@@ -1,0 +1,9 @@
+bin/
+build/
+/adaptive-pg-mcp
+.tools/
+*.pem
+*.key
+*.local
+CLAUDE.local.md
+.env

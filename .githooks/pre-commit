@@ -1,0 +1,45 @@
+#!/bin/sh
+# Commit gate. Runs the whole tree, so commit with explicit paths when another
+# session shares the working tree. Every check names what failed and what to do.
+set -u
+root=$(git rev-parse --show-toplevel)
+cd "$root" || exit 1
+
+fail=0
+say() { printf '%s\n' "$*" >&2; }
+
+if [ -f go.mod ]; then
+  unformatted=$(gofmt -l $(git ls-files '*.go') 2>/dev/null)
+  if [ -n "$unformatted" ]; then
+    say "gate: gofmt wants to change these files. Run gofmt -w on them:"
+    say "$unformatted"
+    fail=1
+  fi
+  if ! go vet ./... >/dev/null 2>&1; then
+    say "gate: go vet reports a problem. Run go vet ./... and fix what it prints."
+    fail=1
+  fi
+  if ! go test ./... >/dev/null 2>&1; then
+    say "gate: a test fails. Run go test ./... and read the first FAIL."
+    fail=1
+  fi
+fi
+
+if ! sh tools/textgate.sh; then fail=1; fi
+if ! sh tools/gogate.sh; then fail=1; fi
+if ! sh tools/stategate.sh docs/STATE.md; then fail=1; fi
+
+# File length cap: a source file over 600 lines is a package asking to be split.
+long=$(git ls-files '*.go' | while read -r f; do
+  n=$(wc -l < "$f"); [ "$n" -gt 600 ] && printf '%s (%s lines)\n' "$f" "$n"; done)
+if [ -n "$long" ]; then
+  say "gate: these Go files are over 600 lines. Split the package instead of growing the file:"
+  say "$long"
+  fail=1
+fi
+
+if [ "$fail" -ne 0 ]; then
+  say "gate: refused. Fix what is listed above; the gate is never bypassed."
+  exit 1
+fi
+exit 0

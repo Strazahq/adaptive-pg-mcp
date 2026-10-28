@@ -1,0 +1,27 @@
+#!/bin/sh
+# Commit message gate. Two rules:
+#   1. no AI attribution trailer of any kind;
+#   2. the subject is at most 72 characters and says what changed.
+# Merge and revert commits are exempt because git writes their subject.
+msg="$1"
+
+if grep -qiE 'co-authored-by:.*(claude|anthropic|copilot|cursor|chatgpt|openai|gemini)|claude-session|generated with.*(claude|copilot|chatgpt)|noreply@anthropic' "$msg"; then
+  echo "gate: AI attribution trailer in the commit message. Remove it." >&2
+  exit 1
+fi
+
+subject=$(grep -v '^#' "$msg" | sed '/^[[:space:]]*$/d' | head -1)
+case "$subject" in
+  Merge\ *|Revert\ *) exit 0 ;;
+esac
+len=$(printf '%s' "$subject" | wc -m | tr -d ' ')
+if [ "$len" -gt 72 ]; then
+  echo "gate: the commit subject is $len characters (max 72)." >&2
+  echo "Say what changed in the subject; put the why in the body." >&2
+  exit 1
+fi
+if printf '%s' "$subject" | grep -q '—'; then
+  echo "gate: an em dash in the commit subject. Use a comma or a period." >&2
+  exit 1
+fi
+exit 0

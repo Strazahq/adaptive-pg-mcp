@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PROJECT_DIR:-.}/tools/sessiongate.sh\"",
+            "timeout": 10,
+            "statusMessage": "session gate"
+          }
+        ]
+      }
+    ]
+  }
+}
