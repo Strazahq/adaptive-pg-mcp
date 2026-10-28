@@ -28,7 +28,7 @@ Commands:
       On stdio, the caller's token comes from the environment variable ADAPTIVE_PG_MCP_TOKEN.
       It runs the start checks first, and does not start when one of them refuses.
   adaptive-pg-mcp check [-config ./server.yaml]
-      Run the start checks on every login of server.yaml without serving, and print what they find.
+      Run the start checks on every login and catalog statement of server.yaml without serving, and print what they find.
       It exits 1 when serve would refuse to start, so a CI job can run it.
   adaptive-pg-mcp token
       Print a new token and its SHA-256 for access.yaml or gateway_tokens_sha256.

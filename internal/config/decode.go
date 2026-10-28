@@ -4,15 +4,26 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"regexp"
 	"strings"
 
 	"go.yaml.in/yaml/v3"
 )
 
-// decode reads the YAML in data into out after checking its version, and
-// refuses any key that out does not have.
+// decode reads the YAML of server.yaml or access.yaml in data into out after
+// checking its version, and refuses any key that out does not have.
 func decode(path string, data []byte, out any) error {
+	return Decode(path, data, formatVersion, out)
+}
+
+// Decode reads the YAML in data, a file in format version, into out after
+// checking that the file has that version, and refuses any key that out
+// does not have. It refuses a file that holds a second YAML document, even
+// an empty one, because the decoder reads the first document only and would
+// ignore the rest. path names the file in every sentence, and no sentence
+// repeats a value of the file. The catalog reads tools.yaml with it.
+func Decode(path string, data []byte, version int, out any) error {
 	var head struct {
 		Version *int `yaml:"version"`
 	}
@@ -20,17 +31,24 @@ func decode(path string, data []byte, out any) error {
 		return decodeError(path, err)
 	}
 	if head.Version == nil {
-		return fmt.Errorf("%s does not set version, which names the format the file is written in. Add version: %d.", path, formatVersion)
+		return fmt.Errorf("%s does not set version, which names the format the file is written in. Add version: %d.", path, version)
 	}
-	if *head.Version != formatVersion {
-		return fmt.Errorf("%s has version %d, and this build reads version %d only. Write the file in version %d, or run a build that reads version %d.", path, *head.Version, formatVersion, formatVersion, *head.Version)
+	if *head.Version != version {
+		return fmt.Errorf("%s has version %d, and this build reads version %d only. Write the file in version %d, or run a build that reads version %d.", path, *head.Version, version, version, *head.Version)
 	}
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	dec.KnownFields(true)
 	if err := dec.Decode(out); err != nil {
 		return decodeError(path, err)
 	}
-	return nil
+	var second yaml.Node
+	switch err := dec.Decode(&second); {
+	case errors.Is(err, io.EOF):
+		return nil
+	case err != nil:
+		return decodeError(path, err)
+	}
+	return fmt.Errorf("%s holds a second YAML document from line %d, which adaptive-pg-mcp would ignore, because it reads one document per file. Keep one document per file.", path, second.Line)
 }
 
 var (
@@ -73,6 +91,8 @@ func kind(goType string) string {
 	switch {
 	case t == "int":
 		return "a whole number"
+	case t == "float64":
+		return "a number"
 	case t == "string":
 		return "a single value"
 	case t == "bool":

@@ -106,18 +106,27 @@ type loginResult struct {
 }
 
 // Check opens a pool for every login of every database, connects to each,
-// and runs the start checks of docs/DESIGN.md section 6. It returns what they
-// found in the order of the config, and keeps the pools open for serving
-// until Close. A login that cannot connect refuses the start, because a check
-// that cannot run is a check that never happened.
+// and runs the start checks of docs/DESIGN.md section 6, and then the
+// catalog check, which serves each catalog tool that passes. It returns what
+// they found, the logins in the order of the config and then the catalog,
+// and keeps the pools open for serving until Close. A login that cannot
+// connect refuses the start, because a check that cannot run is a check that
+// never happened.
 func (s *Server) Check(ctx context.Context) []Finding {
 	s.Close()
 	s.pools = pg.NewPools()
 	var findings []Finding
+	ready := map[pg.Login]bool{}
 	for _, name := range slices.Sorted(maps.Keys(s.cfg.Databases)) {
-		findings = append(findings, s.checkDatabase(ctx, name, s.cfg.Databases[name])...)
+		fs, results := s.checkDatabase(ctx, name, s.cfg.Databases[name])
+		findings = append(findings, fs...)
+		for _, r := range results {
+			for _, role := range r.ref.roles {
+				ready[pg.Login{Database: name, Role: role}] = r.posture != nil
+			}
+		}
 	}
-	return findings
+	return append(findings, s.checkCatalog(ctx, ready)...)
 }
 
 // Close closes the pools that Check opened, if any. A call that still runs
@@ -129,10 +138,11 @@ func (s *Server) Close() {
 }
 
 // checkDatabase checks every login of one database and then the database
-// itself. Every login of a database with more than one must reach the
-// database of its read login, by the id, or the start is refused, because
+// itself, and returns the findings and what the checks of each login found.
+// Every login of a database with more than one must reach the database of
+// its read login, by the id, or the start is refused, because
 // list_databases names the read login's database.
-func (s *Server) checkDatabase(ctx context.Context, name string, db config.Database) []Finding {
+func (s *Server) checkDatabase(ctx context.Context, name string, db config.Database) ([]Finding, []loginResult) {
 	var results []loginResult
 	var findings []Finding
 	refs := loginsOf(name, db)
@@ -148,7 +158,7 @@ func (s *Server) checkDatabase(ctx context.Context, name string, db config.Datab
 			findings = append(findings, Finding{Refuses: true, Text: r.ref.label + " reaches another database than " + read.ref.label + ", and its calls would change a database that list_databases does not name, so adaptive-pg-mcp will not start. Point the connection strings in " + r.ref.login.Env + " and " + read.ref.login.Env + " at the same database."})
 		}
 	}
-	return findings
+	return findings, results
 }
 
 // idGrant is what restores the read of a database id to a login.

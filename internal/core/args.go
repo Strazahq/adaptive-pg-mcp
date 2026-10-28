@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"maps"
+	"math"
+	"regexp"
 	"slices"
 	"strconv"
+	"unicode/utf8"
 
 	"github.com/google/jsonschema-go/jsonschema"
 )
@@ -52,8 +55,10 @@ func checkArgs(tool string, in *jsonschema.Schema, args map[string]any) error {
 }
 
 // mismatch checks v against s, within the part of JSON Schema that the
-// built-in tools use, and says why v does not match, or answers empty. at
-// names v in the sentence, and is empty for the arguments themselves.
+// built-in tools and the catalog tools use, and says why v does not match,
+// or answers empty. A string's maxLength counts characters, and its pattern
+// matches anywhere in it unless the pattern anchors it, as in JSON Schema.
+// at names v in the sentence, and is empty for the arguments themselves.
 func mismatch(s *jsonschema.Schema, v any, at string) string {
 	if s == nil {
 		return ""
@@ -72,6 +77,14 @@ func mismatch(s *jsonschema.Schema, v any, at string) string {
 	case string:
 		if s.MinLength != nil && len(x) < *s.MinLength {
 			return name + " must not be empty"
+		}
+		if n := utf8.RuneCountInString(x); s.MaxLength != nil && n > *s.MaxLength {
+			return name + " must be at most " + plural(int64(*s.MaxLength), "character") + " long, and the call passed " + count(int64(n))
+		}
+		if s.Pattern != "" {
+			if re, err := regexp.Compile(s.Pattern); err != nil || !re.MatchString(x) {
+				return name + " must match the pattern " + s.Pattern + ", and the call passed a string that does not"
+			}
 		}
 	case json.Number:
 		f, _ := x.Float64()
@@ -214,8 +227,13 @@ func valueText(v any) string {
 	return kindOf(v)
 }
 
-// number writes a bound of a schema, such as 1,000.
-func number(f float64) string { return count(int64(f)) }
+// number writes a bound of a schema, such as 1,000 for a whole number and 0.5 for one with a fraction.
+func number(f float64) string {
+	if f == math.Trunc(f) && math.Abs(f) < 1e15 {
+		return count(int64(f))
+	}
+	return strconv.FormatFloat(f, 'f', -1, 64)
+}
 
 // entries writes a count of list entries, such as 1 entry.
 func entries(n int) string {

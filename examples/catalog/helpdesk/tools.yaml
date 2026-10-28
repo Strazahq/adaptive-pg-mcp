@@ -1,0 +1,27 @@
+# The index of the helpdesk statements in this folder. docs/DESIGN.md
+# section 3 holds every key. Each entry joins the statement of its name in
+# a .sql file of this folder, and its params follow the statement's $1, $2
+# and so on. Postgres reports each parameter's type when the server starts.
+version: 1
+tools:
+  tickets_by_status:
+    description: Counts the tickets opened on or after a day, per status. Answers one row per status with its count.
+    mode: read
+    databases: [helpdesk]
+    login: read
+    params:
+      - name: since
+        description: The first day to count, such as 2026-10-01.
+        required: true
+  close_stale_tickets:
+    description: Closes the tickets that have waited in pending for more than a number of days. Answers the id of each ticket it closed, and refuses a call that would close more than 50.
+    mode: write
+    databases: [helpdesk]
+    login: write
+    params:
+      - name: days
+        description: How many days a ticket waits in pending before it closes, from 7 to 90.
+        required: true
+        minimum: 7
+        maximum: 90
+    limits: { write_rows: 50 }

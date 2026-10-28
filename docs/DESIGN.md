@@ -42,7 +42,9 @@ does not start when it is missing or matches nothing.
 `server.yaml` holds every key below. Only the two `allow_` keys have a
 default, false, which is the refusing side. Any other missing key fails the
 start and names the key, and a key that the file's version does not have
-fails it and names its line. `serve` reads the file that `-config` names,
+fails it and names its line. A file that holds a second YAML document fails
+the load too, in server.yaml, access.yaml and tools.yaml alike, because the
+rest would be ignored. `serve` reads the file that `-config` names,
 ./server.yaml by default. examples/ holds a server.yaml and an access.yaml
 that a test loads.
 
@@ -99,15 +101,43 @@ token` prints a new token on a `token:` line and its hash on a
 `token_sha256:` line. A token is `apm_` and 43 base64url characters made from
 32 random bytes.
 
-The catalog folder holds the organization's `.sql` files, with a
-`-- name: <tool>` line before each statement, and a `tools.yaml` index per
-folder. Each index entry has `description`, `mode`, `databases`, `login`,
-`params` (in `$1` order, with name, description and optional `enum`,
-`pattern`, `minimum`, `maximum`, `maxLength`, `required`) and optional
-`limits`. A statement without an entry is not a tool, and two statements with
-one name fail the load. An entry the core cannot turn into a tool fails the
-load too, such as one whose name is not snake_case or whose parameter has a
-Postgres type outside the supported list.
+The catalog folder holds the organization's `.sql` files and one
+`tools.yaml` index per folder, at any depth. A statement starts at a
+`-- name: <tool>` line and runs to the next such line or to the end of its
+file, and before its first name line a file holds only comments and blank
+lines. An index entry joins the statement of its name in the `.sql` files of
+its own folder.
+
+```yaml
+version: 1
+tools:
+  revenue_by_region:
+    description: Sums net revenue per region for one month. One row per region.
+    mode: read                     # or write
+    databases: [sales_eu, sales_us]
+    login: read                    # or write, or an extra login such as finance_reader
+    params:                        # in $1 order
+      - name: month
+        description: The first day of the month, such as 2026-09-01.
+        required: true             # also optional enum, pattern, minimum, maximum, maxLength
+    limits: { rows: 100 }          # optional: rows, bytes, timeout, write_rows
+```
+
+`description`, `mode`, `databases` and `login` are required, and `params` and
+`limits` are optional. A parameter is optional unless it sets
+`required: true`, and a call that leaves it out binds NULL. A field of
+`limits` replaces the same field of server.yaml for that tool. An unknown key
+fails the load and names it, and so does a version other than 1. A statement
+without an entry is not a tool, and the start reports it. These fail the
+load: an entry without a statement, two statements with one name anywhere in
+the catalog, an entry with the name of a built-in tool, an entry that names a
+database that server.yaml does not define or a login that its database does
+not have, and a statement that holds no SQL. The catalog reads only files
+inside its folder, and a link to a file outside it fails the load. An entry
+the core cannot turn into a tool refuses the start once Postgres has reported
+its types, such as one whose name is not snake_case or whose parameter has a
+Postgres type outside the supported list. examples/catalog holds a catalog
+that a test loads and prepares.
 
 ## 4. Tools
 
@@ -178,6 +208,18 @@ A refused statement has run until the rollback, so it held its locks for
 that long. Large object functions write a system catalog, so `execute_sql`
 refuses them.
 
+A catalog tool takes one argument per parameter, with the JSON Schema of the
+type that Postgres reports for it, and a parameter of a domain takes the
+schema of its base type. Each argument travels as text that Postgres reads as
+the parameter's type. A catalog tool in mode read runs in a read-only
+transaction and answers the read shape with `truncated`, and one in mode
+write runs read-write and answers the write shape. A write is rolled back and
+refused when it changes more rows than its write cap, counted as
+`execute_sql` counts them, or when it changes the system catalogs. A catalog
+tool closes its connection after each call, as free SQL does. In standalone
+mode the start reports each tool that a caller's access.yaml entry lists and
+the server does not serve.
+
 `list_databases` returns `{objects: [{value, id, title}], nextCursor}` in
 `structuredContent`. The value is the config name. The id is the cluster's
 system identifier and the database OID joined by a colon, because OIDs repeat
@@ -231,10 +273,14 @@ its entry. The tool carries
   login, by the id of section 4, or the ids cannot be compared because one
   cannot be read. A call would then touch a database other than the one it
   names.
-- A catalog statement does not prepare on one of its databases, or its
-  parameter count differs from its index.
+- A catalog statement does not prepare on one of its databases, its
+  parameter count differs from its index, or a parameter's type differs
+  between two of its databases.
 
-The catalog check arrives with the catalog loader in M2. A login that cannot
+The catalog check prepares each statement with Parse and Describe only, on
+each of its databases and on its entry's login, in a read-only transaction,
+so no statement runs. A catalog that cannot be read or does not load also
+refuses the start. A login that cannot
 connect, or whose connection string does not parse, also refuses the start,
 under invariant 8, because a check that cannot run never happened.
 
@@ -301,8 +347,26 @@ word for word:
   tables, so its read tools rely on read-only transactions alone. A separate
   read login with SELECT only adds the database's own lock.`
 - `finance/revenue.sql statement revenue_by_region does not prepare on
-  sales_us: column "net" does not exist. Fix the statement or remove sales_us
-  from its databases.`
+  sales_us: the server answered: column "net" does not exist (SQLSTATE
+  42703). Fix the statement or remove sales_us from its databases.`
+- `finance/revenue.sql statement revenue_of_region takes 2 parameters on
+  sales_eu, and its index lists 1. List each parameter of the statement in
+  params, in $1 order.`
+- `finance/revenue.sql statement tickets_since has parameter $1 after of
+  type int4 on sales_eu and of type int8 on sales_us, and a tool argument
+  takes one type. Make the types match, or cast the parameter in the
+  statement, such as $1::int4.`
+- `close_tickets on helpdesk would change 50 rows and the cap is 10, so
+  nothing was changed. Narrow the call through its arguments, or ask an
+  administrator to raise limits.write_rows of close_tickets in the catalog.`
+- `wipe_ledger on helpdesk ran a statement whose command tag is SELECT 1 and
+  that changed structure, as the system catalogs show, so it was rolled back
+  and nothing was changed. A catalog tool may change rows only, so ask an
+  administrator to change the statement in the catalog.`
+- A report line, not a refusal: `support_bot lists open_ticket in its tools
+  in access.yaml, and adaptive-pg-mcp serves no built-in tool or catalog tool
+  of that name, so the entry gives it nothing. Correct the name, or remove it
+  from the tools of support_bot.`
 - `the request carries no bearer token, so adaptive-pg-mcp refused it. Send
   the header Authorization: Bearer followed by the token issued for this
   server.`

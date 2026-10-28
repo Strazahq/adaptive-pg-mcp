@@ -7,7 +7,7 @@ listen: 127.0.0.1:8080
 free_sql: read
 limits: { rows: 1000, bytes: 1048576, timeout: 30s, write_rows: 100 }
 access: ./access.yaml
-catalog: none
+catalog: ./catalog
 databases:
   sales_eu:
     login: { dsn_env: SALES_EU_DSN }

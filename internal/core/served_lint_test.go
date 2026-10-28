@@ -93,22 +93,55 @@ func lintDataTool(t *testing.T, m map[string]any, write bool, databases []any) {
 	}
 }
 
-// withCatalogTools adds two catalog tools to s: revenue_eu on sales_eu, and tickets_by_day on helpdesk and sales_eu.
+// withCatalogTools serves two catalog tools on s the way the start checks
+// serve them, with the parameter types that catalog.Check fills in:
+// revenue_eu on sales_eu, and tickets_by_day on helpdesk and sales_eu.
 func withCatalogTools(t *testing.T, s *Server) *Server {
 	t.Helper()
+	queue, half, most := 8, 0.5, 99.5
 	for _, e := range []catalog.Entry{
-		{Name: "revenue_eu", Description: "Sums revenue per region. Answers one row per region, at most the row cap.", Mode: catalog.Read, Databases: []string{"sales_eu"}, Login: "read", SQL: "select 1", Source: "finance/revenue.sql"},
-		{Name: "tickets_by_day", Description: "Counts tickets per day. Answers one row per day, at most the row cap.", Mode: catalog.Read, Databases: []string{"helpdesk", "sales_eu"}, Login: "read", SQL: "select 1", Source: "support/tickets.sql"},
+		{Name: "revenue_eu", Description: "Sums revenue per region for one month. Answers one row per region, at most the row cap.", Mode: catalog.Read, Databases: []string{"sales_eu"}, Login: "read", SQL: "select 1", Source: "finance/revenue.sql",
+			Params: []catalog.Param{
+				{Name: "month", Description: "The first day of the month, such as 2026-09-01.", Type: "date", Required: true},
+				{Name: "min_share", Description: "The smallest share of the total a region must have, from 0.5 to 99.5.", Type: "numeric", Minimum: &half, Maximum: &most},
+			}},
+		{Name: "tickets_by_day", Description: "Counts tickets per day. Answers one row per day, at most the row cap.", Mode: catalog.Read, Databases: []string{"helpdesk", "sales_eu"}, Login: "read", SQL: "select 1", Source: "support/tickets.sql",
+			Params: []catalog.Param{
+				{Name: "day", Description: "The first day to count, such as 2026-10-01.", Type: "date", Required: true},
+				{Name: "queue", Description: "The queue in lowercase letters, or none for every queue.", Type: "text", Pattern: "^[a-z]+$", MaxLength: &queue},
+			}},
 	} {
-		tool, err := Tool(e)
-		if err != nil {
-			t.Fatalf("Tool(%s): %v", e.Name, err)
+		if err := s.addEntry(e); err != nil {
+			t.Fatalf("addEntry(%s): %v", e.Name, err)
 		}
-		s.mcp.AddTool(tool, func(context.Context, *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			return &mcp.CallToolResult{}, nil
-		})
 	}
 	return s
+}
+
+func TestServedCatalogToolsPassTheToolLint(t *testing.T) {
+	s := withCatalogTools(t, New(dataConfig(config.Straza, config.FreeSQLOff), slog.New(slog.DiscardHandler)))
+	write := catalog.Entry{
+		Name: "close_tickets", Description: "Closes the tickets of one queue. Answers rowsAffected, and changes at most the write cap.", Mode: catalog.Write,
+		Databases: []string{"helpdesk"}, Login: "write", SQL: "update tickets set status = 'closed' where queue = $1", Source: "support/close.sql",
+		Params: []catalog.Param{{Name: "queue", Description: "The queue to close.", Type: "text", Required: true}},
+	}
+	if err := s.addEntry(write); err != nil {
+		t.Fatalf("addEntry(%s): %v", write.Name, err)
+	}
+	for _, v := range mcp.SupportedProtocolVersions() {
+		for transport, cs := range map[string]*mcp.ClientSession{"http": overHandler(t, s, gatewayToken, v), "memory": overMemory(t, s, gatewayCaller, v)} {
+			t.Run(v+"/"+transport, func(t *testing.T) {
+				tools, byName := toolsOf(t, cs)
+				lintTools(t, tools)
+				if len(tools) != 12 {
+					t.Errorf("tools/list holds %d tools, want the 9 built-in tools of free_sql off and the 3 catalog tools", len(tools))
+				}
+				lintDataTool(t, byName["revenue_eu"], false, []any{"sales_eu"})
+				lintDataTool(t, byName["tickets_by_day"], false, []any{"helpdesk", "sales_eu"})
+				lintDataTool(t, byName["close_tickets"], true, []any{"helpdesk"})
+			})
+		}
+	}
 }
 
 func TestToolsListIsFilteredPerCaller(t *testing.T) {

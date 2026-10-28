@@ -72,8 +72,17 @@ func TestBadArgumentsAreToolErrors(t *testing.T) {
 		{"a cursor of another schema filter", "list_tables", map[string]any{"database": "helpdesk", "schema": "audit", "cursor": tablesCursor}, badCursor("list_tables")},
 		{"a cursor without its schema filter", "list_tables", map[string]any{"database": "helpdesk", "cursor": tablesCursor}, badCursor("list_tables")},
 		{"a cursor with its schema filter passes", "list_tables", map[string]any{"database": "helpdesk", "schema": "public", "cursor": tablesCursor}, notStarted("list_tables", "helpdesk")},
+		{"a catalog call without its required argument", "tickets_by_day", map[string]any{"database": "helpdesk"}, refused("tickets_by_day", "it needs the argument day, and the call leaves it out")},
+		{"a catalog argument of the wrong type", "tickets_by_day", map[string]any{"database": "helpdesk", "day": 20261001}, refused("tickets_by_day", "the argument day must be a string, and the call passed an integer")},
+		{"a catalog argument longer than its maxLength", "tickets_by_day", map[string]any{"database": "helpdesk", "day": "2026-10-01", "queue": "operations"}, refused("tickets_by_day", "the argument queue must be at most 8 characters long, and the call passed 10")},
+		{"a catalog argument that does not match its pattern", "tickets_by_day", map[string]any{"database": "helpdesk", "day": "2026-10-01", "queue": "Ops"}, refused("tickets_by_day", "the argument queue must match the pattern ^[a-z]+$, and the call passed a string that does not")},
+		{"a catalog argument the tool does not take", "tickets_by_day", map[string]any{"database": "helpdesk", "day": "2026-10-01", "region": "north"}, refused("tickets_by_day", `it takes no argument named "region"`)},
+		{"a catalog call on a database outside its entry", "revenue_eu", map[string]any{"database": "helpdesk", "month": "2026-09-01"}, refused("revenue_eu", `the argument database must be one of "sales_eu", and the call passed "helpdesk"`)},
+		{"a catalog number below a fractional minimum", "revenue_eu", map[string]any{"database": "sales_eu", "month": "2026-09-01", "min_share": 0.25}, refused("revenue_eu", "the argument min_share must be at least 0.5, and the call passed 0.25")},
+		{"a catalog number above a fractional maximum", "revenue_eu", map[string]any{"database": "sales_eu", "month": "2026-09-01", "min_share": 99.75}, refused("revenue_eu", "the argument min_share must be at most 99.5, and the call passed 99.75")},
+		{"a catalog call that passes", "tickets_by_day", map[string]any{"database": "helpdesk", "day": "2026-10-01", "queue": "ops"}, notStarted("tickets_by_day", "helpdesk")},
 	}
-	s := New(dataConfig(config.Straza, config.FreeSQLReadWrite), slog.New(slog.DiscardHandler))
+	s := withCatalogTools(t, New(dataConfig(config.Straza, config.FreeSQLReadWrite), slog.New(slog.DiscardHandler)))
 	for _, v := range mcp.SupportedProtocolVersions() {
 		cs := overMemory(t, s, gatewayCaller, v)
 		for _, c := range cases {

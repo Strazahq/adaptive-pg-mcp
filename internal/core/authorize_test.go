@@ -146,9 +146,12 @@ func TestAuthorizationOnEveryRevision(t *testing.T) {
 		{"list_databases when its entry does not list it, before its arguments are read", "support_bot", "list_databases", map[string]any{"cursor": 5}, "support_bot may not use list_databases, because its entry in access.yaml does not list that tool, so the call is refused. Use a tool that its entry lists, or ask an administrator to add list_databases to its tools."},
 		{"list_databases when its entry lists it passes", "ops_bot", "list_databases", map[string]any{}, "list_databases cannot read the id of helpdesk on its read login, because adaptive-pg-mcp has not run its start checks, so it has no connection to the database, so it answers no page. Run adaptive-pg-mcp check to see why, and fix the login."},
 		{"another caller is refused a tool it does not list", "ops_bot", "delete_rows", map[string]any{"database": "helpdesk", "table": "tickets", "where": where}, "ops_bot may not use delete_rows, because its entry in access.yaml does not list that tool, so the call is refused. Use a tool that its entry lists, or ask an administrator to add delete_rows to its tools."},
+		{"a catalog tool its entry does not list", "ops_bot", "revenue_eu", map[string]any{"database": "sales_eu", "month": "2026-09-01"}, "ops_bot may not use revenue_eu, because its entry in access.yaml does not list that tool, so the call is refused. Use a tool that its entry lists, or ask an administrator to add revenue_eu to its tools."},
+		{"a catalog tool on a database its entry does not list", "support_bot", "tickets_by_day", map[string]any{"database": "sales_eu", "day": "2026-10-01"}, dbRefused},
+		{"a catalog tool its entry lists passes, also for a caller narrowed to tables", "support_bot", "tickets_by_day", map[string]any{"database": "helpdesk", "day": "2026-10-01"}, notStarted("tickets_by_day", "helpdesk")},
 	}
-	standalone := New(dataConfig(config.Standalone, config.FreeSQLReadWrite), slog.New(slog.DiscardHandler))
-	straza := New(dataConfig(config.Straza, config.FreeSQLReadWrite), slog.New(slog.DiscardHandler))
+	standalone := withCatalogTools(t, New(dataConfig(config.Standalone, config.FreeSQLReadWrite), slog.New(slog.DiscardHandler)))
+	straza := withCatalogTools(t, New(dataConfig(config.Straza, config.FreeSQLReadWrite), slog.New(slog.DiscardHandler)))
 	tokens := map[string]string{"support_bot": tokenA, "ops_bot": tokenB, "nodb_bot": tokenNoDB}
 	for _, v := range mcp.SupportedProtocolVersions() {
 		t.Run(v, func(t *testing.T) {

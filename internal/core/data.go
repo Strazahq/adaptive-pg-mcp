@@ -35,6 +35,12 @@ type dataTool struct {
 	write bool
 	// free is true for query_sql and execute_sql, which a caller narrowed to tables may not use.
 	free bool
+	// login is the login the tool runs on, by its name in logins, such as finance_reader. Empty means read for a read tool and write for a write tool.
+	login string
+	// limits are the caps of the tool's calls. Nil means the limits of server.yaml.
+	limits *config.Limits
+	// fromCatalog is true for a catalog tool, whose caps an administrator raises in the limits of its entry.
+	fromCatalog bool
 	// run runs a call whose arguments match the input schema.
 	run func(ctx context.Context, c *call, args map[string]any) *mcp.CallToolResult
 }
@@ -54,14 +60,20 @@ func (s *Server) addDataTools() {
 		tools = append(tools, s.executeSQLTool(), s.executeDDLTool())
 	}
 	for _, d := range tools {
-		s.mcp.AddTool(d.tool, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			c, args, refused := s.begin(ctx, req, d)
-			if refused != nil {
-				return refused, nil
-			}
-			return d.run(ctx, c, args), nil
-		})
+		s.addTool(d)
 	}
+}
+
+// addTool serves a data tool, built-in or from the catalog. Every call of
+// it passes the checks of begin before its statement runs.
+func (s *Server) addTool(d *dataTool) {
+	s.mcp.AddTool(d.tool, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		c, args, refused := s.begin(ctx, req, d)
+		if refused != nil {
+			return refused, nil
+		}
+		return d.run(ctx, c, args), nil
+	})
 }
 
 // call is one call of a data tool that passed the checks before its statement.
@@ -72,6 +84,12 @@ type call struct {
 	database string
 	meta     mcp.Meta
 	write    bool
+	// login is the login the call runs on, by its name in logins.
+	login string
+	// limits are the caps of the call: the limits of server.yaml, or those of a catalog entry over them.
+	limits config.Limits
+	// fromCatalog is true for a call of a catalog tool.
+	fromCatalog bool
 	// typed and untyped are the columns of a read that stopped at its cap, and those whose type names run reads after its transaction.
 	typed   []resultColumn
 	untyped []untypedColumn
@@ -100,7 +118,16 @@ func (s *Server) begin(ctx context.Context, req *mcp.CallToolRequest, d *dataToo
 	if err := checkArgs(name, d.tool.InputSchema.(*jsonschema.Schema), args); err != nil {
 		return nil, nil, toolError(err)
 	}
-	c := &call{s: s, tool: name, caller: caller, database: args[databaseArg].(string), meta: req.Params.Meta, write: d.write}
+	c := &call{s: s, tool: name, caller: caller, database: args[databaseArg].(string), meta: req.Params.Meta, write: d.write, login: d.login, limits: s.cfg.Limits, fromCatalog: d.fromCatalog}
+	if c.login == "" {
+		c.login = "read"
+		if d.write {
+			c.login = "write"
+		}
+	}
+	if d.limits != nil {
+		c.limits = *d.limits
+	}
 	return c, args, nil
 }
 
@@ -129,21 +156,21 @@ func refuse(text string) error { return &refusedCall{text: text} }
 // run runs fn in one transaction of the call's login, after step 4 of
 // docs/DESIGN.md section 5: when _meta carries an ai.straza/object-id, it
 // must equal the id of the database read in this very transaction. A read
-// runs read-only on the read login, and a write read-write on the write
-// login, both with statement_timeout from the limits. A refusal or an error
-// of fn rolls the transaction back and answers a tool error. A read that
-// stopped at its cap answers its rows, and the names of types that pgx does
-// not know are read in a transaction of their own, since its connection is closed.
+// runs read-only and a write read-write, both with statement_timeout from
+// the call's limits. A refusal or an error of fn rolls the transaction back
+// and answers a tool error. A read that stopped at its cap answers its rows,
+// and the names of types that pgx does not know are read in a transaction of
+// their own, since its connection is closed.
 func (c *call) run(ctx context.Context, fn func(tx *pg.Tx) (*mcp.CallToolResult, error)) *mcp.CallToolResult {
 	if c.s.pools == nil {
 		return toolError(errors.New(c.tool + " on " + c.database + " cannot run, because " + errNotStarted.Error() + ". Serve it with adaptive-pg-mcp serve, which runs them before it serves."))
 	}
-	login, access := pg.Login{Database: c.database, Role: "read"}, pg.ReadOnly
+	login, access := pg.Login{Database: c.database, Role: c.login}, pg.ReadOnly
 	if c.write {
-		login, access = pg.Login{Database: c.database, Role: "write"}, pg.ReadWrite
+		access = pg.ReadWrite
 	}
 	var res *mcp.CallToolResult
-	err := c.s.pools.Run(ctx, login, access, c.s.cfg.Limits.Timeout, func(tx *pg.Tx) error {
+	err := c.s.pools.Run(ctx, login, access, c.limits.Timeout, func(tx *pg.Tx) error {
 		if err := c.s.checkObjectID(ctx, tx, c.database, c.meta); err != nil {
 			return refuse(err.Error())
 		}
@@ -156,7 +183,7 @@ func (c *call) run(ctx context.Context, fn func(tx *pg.Tx) (*mcp.CallToolResult,
 	case err == nil:
 		return res
 	case errors.Is(err, errCut) && len(c.untyped) > 0:
-		err = c.s.pools.Run(ctx, login, access, c.s.cfg.Limits.Timeout, func(tx *pg.Tx) error { return nameTypes(ctx, tx, c.typed, c.untyped) })
+		err = c.s.pools.Run(ctx, login, access, c.limits.Timeout, func(tx *pg.Tx) error { return nameTypes(ctx, tx, c.typed, c.untyped) })
 		if err == nil {
 			return res
 		}
@@ -185,19 +212,34 @@ func (c *call) failed(err error) error {
 	case errors.Is(err, context.Canceled):
 		advice = "Call it again if the answer is still needed."
 	case errors.As(err, &pgErr) && pgErr.Code == "57014":
-		advice = "A statement may run for " + c.s.cfg.Limits.Timeout.String() + ", so narrow the call, or ask an administrator to raise limits.timeout."
+		advice = "A statement may run for " + c.limits.Timeout.String() + ", so narrow the call, or ask an administrator to raise " + c.limitKey("timeout") + "."
 	}
 	return errors.New(c.tool + " on " + c.database + " failed, because " + c.s.pools.Reason(err) + ", so " + done + ". " + advice)
 }
 
 // writeCap is step 6 of docs/DESIGN.md section 5 for a write: a write that
-// changed more rows than write_rows is refused, and the refusal rolls it back.
+// changed more rows than the call's write_rows is refused, and the refusal
+// rolls it back.
 func (c *call) writeCap(changed int64, advice string) error {
-	limit := int64(c.s.cfg.Limits.WriteRows)
+	limit := int64(c.limits.WriteRows)
 	if changed <= limit {
 		return nil
 	}
-	return refuse(c.tool + " on " + c.database + " would change " + count(changed) + " rows and the cap is " + count(limit) + ", so nothing was changed. " + advice + ", or ask an administrator to raise write_rows.")
+	key := "write_rows"
+	if c.fromCatalog {
+		key = c.limitKey("write_rows")
+	}
+	return refuse(c.tool + " on " + c.database + " would change " + count(changed) + " rows and the cap is " + count(limit) + ", so nothing was changed. " + advice + ", or ask an administrator to raise " + key + ".")
+}
+
+// limitKey names the key that sets one cap of the call, such as
+// limits.timeout, or for a catalog tool the key in its entry, because a cap
+// that the entry sets does not follow server.yaml.
+func (c *call) limitKey(name string) string {
+	if c.fromCatalog {
+		return "limits." + name + " of " + c.tool + " in the catalog"
+	}
+	return "limits." + name
 }
 
 // readAnswer is the result of a read: the columns, the rows and truncated, with text for people.
@@ -219,9 +261,9 @@ func (c *call) stopped(a collected, limit int, narrow string) string {
 	case !a.more:
 		return ""
 	case a.bytesFull:
-		return " More rows follow, and the answer stopped before the next row, because it would pass the byte cap of " + count(int64(c.s.cfg.Limits.Bytes)) + " bytes. " + narrow
-	case limit < c.s.cfg.Limits.Rows:
+		return " More rows follow, and the answer stopped before the next row, because it would pass the byte cap of " + count(int64(c.limits.Bytes)) + " bytes. " + narrow
+	case limit < c.limits.Rows:
 		return " More rows follow than the limit of " + count(int64(limit)) + "."
 	}
-	return " More rows follow, and the answer stopped at the row cap of " + count(int64(c.s.cfg.Limits.Rows)) + ". " + narrow
+	return " More rows follow, and the answer stopped at the row cap of " + count(int64(c.limits.Rows)) + ". " + narrow
 }

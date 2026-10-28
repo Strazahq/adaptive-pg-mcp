@@ -43,7 +43,7 @@ type Param struct {
 	Name string
 	// Description tells the agent what to pass.
 	Description string
-	// Type is the Postgres type name the prepare reports, such as int4.
+	// Type is the Postgres type name the prepare reports, such as int4, with a domain read as its base type.
 	Type string
 	// Enum lists the only values the parameter takes. Empty means any.
 	Enum []string

@@ -43,7 +43,7 @@ func (c *call) scan(rows pgx.Rows, maxRows int) (collected, error) {
 	fields := rows.FieldDescriptions()
 	types := rows.Conn().TypeMap()
 	a := collected{rows: [][]any{}}
-	size, limit := 0, c.s.cfg.Limits.Bytes
+	size, limit := 0, c.limits.Bytes
 	for rows.Next() {
 		if len(a.rows) >= maxRows {
 			a.more = true

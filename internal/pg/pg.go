@@ -7,7 +7,8 @@
 // protocol, which carries exactly one statement, even when it has no
 // arguments. pgx itself would send an argument-free Exec on the simple query
 // protocol, which can carry several statements, so nothing in this package
-// calls Exec.
+// calls Exec. Tx.Describe sends a statement on the same protocol to learn its
+// parameter types, and never runs it.
 package pg
 
 import (
@@ -166,6 +167,23 @@ func (t *Tx) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, erro
 		}
 	}
 	return t.tx.Query(ctx, sql, append([]any{pgx.QueryExecModeDescribeExec}, args...)...)
+}
+
+// Describe sends sql as one unnamed prepared statement on the extended
+// protocol with Parse and Describe only, and returns the type OIDs of its
+// parameters in $1 order. Postgres parses and analyzes the statement and
+// never runs it, it reports a parameter of a domain as the domain, and it
+// refuses a text that holds more than one statement. An empty text is
+// refused before it is sent.
+func (t *Tx) Describe(ctx context.Context, sql string) ([]uint32, error) {
+	if sql == "" {
+		return nil, &Error{Reason: "the statement is empty"}
+	}
+	d, err := t.tx.Conn().PgConn().Prepare(ctx, "", sql, nil)
+	if err != nil {
+		return nil, err
+	}
+	return d.ParamOIDs, nil
 }
 
 // setTimeout sets statement_timeout for the rest of the transaction.

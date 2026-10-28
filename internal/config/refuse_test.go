@@ -231,3 +231,31 @@ func TestLoadNamesAMissingServerFile(t *testing.T) {
 		t.Errorf("refusal:\n got %v\nwant %s", err, want)
 	}
 }
+
+func TestLoadRefusesASecondDocument(t *testing.T) {
+	second := func(file string, line int) string {
+		return "$DIR/" + file + " holds a second YAML document from line " + fmt.Sprint(line) + ", which adaptive-pg-mcp would ignore, because it reads one document per file. Keep one document per file."
+	}
+	valid := marshal(t, serverDoc(), accessDoc(), environment())
+	next := strings.Count(valid.server, "\n") + 1
+	cases := []struct {
+		name, server, access, want string
+	}{
+		{"server.yaml with a second document", valid.server + "---\nmode: straza\n", valid.access, second("server.yaml", next)},
+		{"server.yaml that ends with an empty document", valid.server + "---\n", valid.access, second("server.yaml", next)},
+		{"access.yaml with a second document", valid.server, valid.access + "---\ncallers: []\n", second("access.yaml", strings.Count(valid.access, "\n")+1)},
+		{"server.yaml that starts with a document marker loads", "---\n" + valid.server, valid.access, ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			_, dir, err := load(t, files{server: c.server, access: c.access, env: environment()})
+			want := strings.ReplaceAll(c.want, "$DIR", dir)
+			switch {
+			case want == "" && err != nil:
+				t.Errorf("Load refused one document after a --- line: %v", err)
+			case want != "" && (err == nil || err.Error() != want):
+				t.Errorf("refusal:\n got %v\nwant %s", err, want)
+			}
+		})
+	}
+}
