@@ -23,21 +23,37 @@ them on their databases. `internal/core` turns catalog entries into tools and
 holds the built-in tools and the call path. They meet at `catalog.Entry`: the
 catalog fills it with what Postgres reports, such as each parameter's type
 name, and the core decides what the agent sees, such as the JSON Schema, the
-hints and the marks. The catalog never imports the go-sdk. `cmd/adaptive-pg-mcp`,
-`internal/config` and `internal/pg` arrive with M1.
+hints and the marks. The catalog never imports the go-sdk.
+`cmd/adaptive-pg-mcp` holds the commands, `internal/config` reads
+`server.yaml` and `access.yaml`, and `internal/pg` arrives with the pools.
+
+Over HTTP the endpoint is `/mcp`. Every request carries
+`Authorization: Bearer` and a token, and the server checks it on every
+request, not only the first. A request with an `Origin` header is refused,
+because the server serves no web page. A request body is capped at 1 MiB.
+Revisions before 2026-07-28 keep protocol sessions, and each session is bound
+to the caller that opened it. Revision 2026-07-28 has no sessions, so each of
+its requests stands alone. On stdio the caller's token comes from the
+environment variable `ADAPTIVE_PG_MCP_TOKEN`, and `serve` checks it once and
+does not start when it is missing or matches nothing.
 
 ## 3. Configuration
 
 `server.yaml` holds every key below. Only the two `allow_` keys have a
 default, false, which is the refusing side. Any other missing key fails the
-start and names the key.
+start and names the key, and a key that the file's version does not have
+fails it and names its line. `serve` reads the file that `-config` names,
+./server.yaml by default. examples/ holds a server.yaml and an access.yaml
+that a test loads.
 
 ```yaml
+version: 1                       # the format version of this file
 mode: straza                     # or standalone
 listen: 127.0.0.1:8080           # or stdio
 free_sql: read-write             # off, read or read-write
 limits: { rows: 1000, bytes: 1048576, timeout: 30s, write_rows: 100 }
-gateway_tokens_sha256: [ "..." ] # mode straza: the call and listing tokens
+gateway_tokens_sha256: [ "..." ] # mode straza only: the call and listing tokens
+access: ./access.yaml            # mode standalone only
 catalog: ./catalog               # a folder, or none
 databases:
   sales_eu:
@@ -57,11 +73,31 @@ still decides the tools, the databases and the approval. Separate logins add
 the database's own grants as one more lock. Logins are always real logins,
 never roles to switch to, because a role switch is no boundary against free
 SQL. A catalog tool may name any extra login of its database, such as
-`finance_reader`.
+`finance_reader`, which `logins` lists next to `read` and `write`.
 
-`access.yaml` is used in standalone mode only. Each caller has a name, a
-SHA-256 of its token, and the tools and databases it may use. Tables may
-narrow it further. `adaptive-pg-mcp token` prints a new token and its hash.
+`access` is required in mode standalone and refused in mode straza, and
+`gateway_tokens_sha256` the other way round. Relative `access` and `catalog`
+paths resolve against the folder of `server.yaml`. Every `dsn_env` variable
+must be set and not empty, and the load names the variable, never its value.
+
+`access.yaml` is used in standalone mode only:
+
+```yaml
+version: 1
+callers:
+  - name: support_bot
+    token_sha256: "<64 lowercase hex characters>"
+    tools: [list_tables, read_rows]
+    databases: [helpdesk]
+    tables: [public.tickets]   # optional
+```
+
+Each caller has a name, a SHA-256 of its token, and the tools and databases
+it may use. Tables may narrow it further. Names and hashes are unique, and
+every database a caller names must be in `server.yaml`. `adaptive-pg-mcp
+token` prints a new token on a `token:` line and its hash on a
+`token_sha256:` line. A token is `apm_` and 43 base64url characters made from
+32 random bytes.
 
 The catalog folder holds the organization's `.sql` files, with a
 `-- name: <tool>` line before each statement, and a `tools.yaml` index per
@@ -158,6 +194,16 @@ word for word:
 - `finance/revenue.sql statement revenue_by_region does not prepare on
   sales_us: column "net" does not exist. Fix the statement or remove sales_us
   from its databases.`
+- `the request carries no bearer token, so adaptive-pg-mcp refused it. Send
+  the header Authorization: Bearer followed by the token issued for this
+  server.`
+- `the bearer token of the request is malformed or not one this server
+  knows, so adaptive-pg-mcp refused it. Send the token issued for this
+  server, once, after Bearer.`
+- `ADAPTIVE_PG_MCP_TOKEN is not set, and on stdio adaptive-pg-mcp needs it to
+  know who calls, so it will not start. Set ADAPTIVE_PG_MCP_TOKEN to the token
+  of a caller in access.yaml in the environment the client starts the server
+  with.`
 
 ## 8. Behind Straza
 
@@ -167,7 +213,9 @@ reference. In `mode: straza`, the server accepts only the tokens Straza holds,
 one for calls and one for the listing. Straza decides which tools and which
 databases each agent may use, holds a call for approval when its policy says
 so, and writes the audit record. The server checks the id Straza sends, so a
-database dropped and created again under the same name is refused.
+database dropped and created again under the same name is refused. In mode
+straza every request has the caller `straza`, because Straza holds the
+identity of the agent.
 
 ## 9. Tests
 

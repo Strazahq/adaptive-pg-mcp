@@ -1,0 +1,14 @@
+# An example access.yaml for the example server.yaml. adaptive-pg-mcp token
+# prints a new token and the token_sha256 line to paste here. The two hashes
+# below are placeholders that belong to no token.
+version: 1
+callers:
+  - name: support_bot
+    token_sha256: "0000000000000000000000000000000000000000000000000000000000000001"
+    tools: [list_tables, describe_table, read_rows, insert_rows]
+    databases: [helpdesk]
+    tables: [public.tickets]
+  - name: analyst
+    token_sha256: "0000000000000000000000000000000000000000000000000000000000000002"
+    tools: [list_schemas, list_tables, describe_table, read_rows, aggregate, query_sql]
+    databases: [sales_eu]

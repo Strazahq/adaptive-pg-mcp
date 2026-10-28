@@ -1,4 +1,5 @@
-// Package core turns catalog entries into MCP tools.
+// Package core serves adaptive-pg-mcp over stdio and Streamable HTTP, checks
+// the token of every caller, and turns catalog entries into MCP tools.
 package core
 
 import (
