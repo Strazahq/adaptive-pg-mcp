@@ -10,7 +10,7 @@ import (
 	"github.com/strazahq/adaptive-pg-mcp/internal/pgtest"
 )
 
-// TestHarness checks that each harness server runs its major version and that NewDatabase makes a database that is gone after cleanup.
+// TestHarness checks that each harness server runs its major version, and that NewDatabase and NewLogin make a database and a login that are gone after cleanup.
 func TestHarness(t *testing.T) {
 	tests := []struct {
 		major int
@@ -60,6 +60,37 @@ func TestHarness(t *testing.T) {
 			}
 			if exists(t, admin, name) {
 				t.Errorf("database %s on %v is still in pg_database after cleanup", name, s)
+			}
+
+			var role string
+			t.Run("login", func(t *testing.T) {
+				l := pgtest.NewLogin(t, s, "pw-pgtest-login", "BYPASSRLS")
+				role = l.Name
+				d := pgtest.NewDatabase(t, s)
+				cfg, err := pgx.ParseConfig(l.DSN(t, d))
+				if err != nil {
+					t.Fatalf("the DSN of %v does not parse: %v", l, err)
+				}
+				conn, err := pgx.ConnectConfig(t.Context(), cfg)
+				if err != nil {
+					t.Fatalf("%v cannot connect to %v: %v", l, d, err)
+				}
+				defer conn.Close(t.Context())
+				var user, db string
+				var bypass bool
+				if err := conn.QueryRow(t.Context(), "SELECT session_user, current_database(), rolbypassrls FROM pg_roles WHERE rolname = session_user").Scan(&user, &db, &bypass); err != nil {
+					t.Fatalf("reading the session of %v: %v", l, err)
+				}
+				if user != l.Name || db != d.Name || !bypass {
+					t.Errorf("the DSN of %v logs in as %s to %s with BYPASSRLS %v", l, user, db, bypass)
+				}
+			})
+			if role == "" {
+				t.Fatalf("the login subtest made no login on %v, so its cleanup cannot be checked", s)
+			}
+			var n int
+			if err := admin.QueryRow(t.Context(), "SELECT count(*) FROM pg_roles WHERE rolname = $1", role).Scan(&n); err != nil || n != 0 {
+				t.Errorf("login %s on %v is still in pg_roles after cleanup (%v)", role, s, err)
 			}
 		})
 	}

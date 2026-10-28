@@ -138,8 +138,15 @@ parameters.
 `structuredContent`. The value is the config name. The id is the cluster's
 system identifier and the database OID joined by a colon, because OIDs repeat
 across clusters and Straza fails a listing that holds one id under two
-values. The core lane confirms which grant reading the system identifier
-needs on 14 to 18. A standalone caller sees only its own databases.
+values. A plain login reads the system identifier on 14 to 18, because
+`pg_control_system()` keeps its default EXECUTE grant to PUBLIC. The id is
+read on the database's read login, and a page with an id that cannot be read
+is a tool error, because an item without an id would hide a database that was
+dropped and created again. The title is the config name. A page holds at most
+25 databases, and `nextCursor` is opaque. A standalone caller sees only the
+databases of its access.yaml entry. The tool carries
+`ai.straza/object: {type: database, reach: all}`,
+`ai.straza/lists-objects: {type: database}` and `readOnlyHint`.
 
 ## 5. Every call, in order
 
@@ -162,17 +169,25 @@ needs on 14 to 18. A standalone caller sees only its own databases.
 
 - A login is a superuser while `free_sql` is on, and its database does not
   set `allow_superuser: true`. A superuser's free SQL is not limited to the
-  database.
-- A database has dblink or postgres_fdw installed and does not set
-  `allow_cross_database: true`. Either lets a call reach another database,
-  which breaks the promise that a call touches only the database it names.
+  database. A login that is a member of a superuser role counts, because free
+  SQL can switch to that role.
+- A database that one of its logins reaches has dblink or postgres_fdw
+  installed, and the database does not set `allow_cross_database: true`.
+  Either lets a call reach another database, which breaks the promise that a
+  call touches only the database it names.
 - A catalog statement does not prepare on one of its databases, or its
   parameter count differs from its index.
+
+The catalog check arrives with the catalog loader in M2. A login that cannot
+connect, or whose connection string does not parse, also refuses the start,
+under invariant 8, because a check that cannot run never happened.
 
 Everything else is reported, not refused. `check` and the start log say what
 each login can do, such as that it can write to every table or has BYPASSRLS,
 so the operator sees the posture. `check` runs without serving, so a catalog
-repo runs it in its CI.
+repo runs it in its CI. It prints one `refusal:` or `report:` line per finding
+and a closing `check:` line, and it exits 1 when the start would be refused.
+`serve` logs refusals at ERROR and reports at WARN.
 
 ## 7. Errors, in plain words
 
@@ -204,6 +219,23 @@ word for word:
   know who calls, so it will not start. Set ADAPTIVE_PG_MCP_TOKEN to the token
   of a caller in access.yaml in the environment the client starts the server
   with.`
+- `the write login of helpdesk is a superuser and free SQL is on, so
+  adaptive-pg-mcp will not start. Use a login without superuser, turn
+  free_sql off, or set allow_superuser: true for helpdesk.`
+- `sales_eu has dblink installed, which lets a call reach another database,
+  so adaptive-pg-mcp will not start. Drop the extension from sales_eu, or set
+  allow_cross_database: true for sales_eu.`
+- `the write login of helpdesk reaches a database that has dblink installed,
+  which lets a call reach another database, so adaptive-pg-mcp will not
+  start. Drop the extension from that database, or set allow_cross_database:
+  true for helpdesk.`
+- `the login of sales_eu cannot connect, because the server answered:
+  password authentication failed for user "sales" (SQLSTATE 28P01), so
+  adaptive-pg-mcp will not start. Check the connection string in SALES_EU_DSN,
+  and that the database server is up and accepts the login.`
+- `the cursor of list_databases does not decode to a page of this listing,
+  so the call is refused. Pass the nextCursor of the previous page exactly as
+  it came, or leave cursor out to start from the first page.`
 
 ## 8. Behind Straza
 

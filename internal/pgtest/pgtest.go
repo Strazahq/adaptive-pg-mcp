@@ -8,6 +8,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"io/fs"
+	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -122,6 +124,77 @@ func NewDatabase(t testing.TB, s Server) Database {
 		}
 	})
 	return d
+}
+
+// Login is a login role that a test made on one harness server.
+type Login struct {
+	// Name is the role name, made from crypto/rand.
+	Name string
+	// Server is the server the role lives on.
+	Server Server
+	// password sits behind a pointer, so printing a Login with any verb never shows it.
+	password *string
+}
+
+// String names the login and its server.
+func (l Login) String() string { return "login " + l.Name + " on " + l.Server.String() }
+
+// passwordRule is the form of a test login's password, which keeps it safe inside a quoted literal.
+const passwordRule = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_"
+
+// NewLogin creates a login role with a random name and the given password on s, with
+// role options such as SUPERUSER or IN ROLE pg_monitor, and drops it at t.Cleanup.
+//
+// Roles belong to the whole server, so a test creates its logins before the
+// databases they reach. Cleanup then drops the databases first, and with them
+// the grants that would keep a role from being dropped.
+func NewLogin(t testing.TB, s Server, password string, options ...string) Login {
+	t.Helper()
+	if password == "" || strings.Trim(password, passwordRule) != "" {
+		t.Fatalf("pgtest: a test login's password must be letters, digits, - and _ only, so that it is safe in a quoted literal")
+	}
+	b := make([]byte, 8)
+	if _, err := rand.Read(b); err != nil {
+		t.Fatalf("pgtest: crypto/rand gave no bytes for a login name on %v: %v", s, err)
+	}
+	l := Login{Name: "pgtest_" + hex.EncodeToString(b), Server: s, password: &password}
+	quoted := pgx.Identifier{l.Name}.Sanitize()
+
+	admin := connect(t, s, "")
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	sql := "CREATE ROLE " + quoted + " LOGIN PASSWORD '" + password + "'"
+	if len(options) > 0 {
+		sql += " " + strings.Join(options, " ")
+	}
+	if err := exec(ctx, admin, sql); err != nil {
+		t.Fatalf("pgtest: cannot create %v: %s", l, scrub(err, s))
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+		if err := exec(ctx, admin, "DROP ROLE "+quoted); err != nil {
+			t.Errorf("pgtest: cannot drop %v: %s. Create logins before the databases they reach, so that cleanup drops the databases first.", l, scrub(err, s))
+		}
+	})
+	return l
+}
+
+// DSN returns the connection string that logs l in to d, with l's password.
+func (l Login) DSN(t testing.TB, d Database) string {
+	t.Helper()
+	cfg, err := pgx.ParseConfig(*l.Server.dsn)
+	if err != nil {
+		t.Fatalf("pgtest: the connection string for %v does not parse, so it is not shown here. %s", l.Server, startHint)
+	}
+	u := url.URL{
+		Scheme:   "postgres",
+		User:     url.UserPassword(l.Name, *l.password),
+		Host:     net.JoinHostPort(cfg.Host, strconv.Itoa(int(cfg.Port))),
+		Path:     "/" + d.Name,
+		RawQuery: "sslmode=disable",
+	}
+	return u.String()
 }
 
 // connect opens a connection to database on s, or to its postgres database when database is empty, and closes it at t.Cleanup.

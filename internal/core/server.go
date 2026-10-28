@@ -2,14 +2,17 @@ package core
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"runtime/debug"
+	"strconv"
 
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/strazahq/adaptive-pg-mcp/internal/config"
+	"github.com/strazahq/adaptive-pg-mcp/internal/pg"
 )
 
 // serverName is the name the server gives itself in every answer.
@@ -24,14 +27,44 @@ type Server struct {
 	log   *slog.Logger
 	creds []credential
 	mcp   *mcp.Server
+	// pools are the connection pools that Check opens, and nil before it runs.
+	pools *pg.Pools
+	// page is the most databases one page of list_databases answers.
+	page int
 }
 
-// New builds the server for cfg. It registers no tools yet.
+// New builds the server for cfg with its built-in tools. It connects to no
+// database until Check, Serve or ServeStdio runs.
 func New(cfg *config.Config, log *slog.Logger) *Server {
-	s := &Server{cfg: cfg, log: log, creds: credentials(cfg)}
+	s := &Server{cfg: cfg, log: log, creds: credentials(cfg), page: listPage}
 	s.mcp = mcp.NewServer(&mcp.Implementation{Name: serverName, Version: buildVersion()}, &mcp.ServerOptions{Logger: log})
 	s.mcp.AddReceivingMiddleware(identify)
+	s.mcp.AddTool(listDatabasesTool(), s.listDatabases)
 	return s
+}
+
+// start runs the start checks before the server serves, logs every finding,
+// and returns a refusal when one of them refuses the start.
+func (s *Server) start(ctx context.Context) error {
+	refused := 0
+	for _, f := range s.Check(ctx) {
+		if f.Refuses {
+			refused++
+			s.log.Error(f.Text)
+		} else {
+			s.log.Warn(f.Text)
+		}
+	}
+	if refused > 0 {
+		s.Close()
+		checks := strconv.Itoa(refused) + " start checks"
+		if refused == 1 {
+			checks = "1 start check"
+		}
+		return errors.New("adaptive-pg-mcp will not start, because " + checks + " refused it, as the log lines above say. Fix what each one says, and run adaptive-pg-mcp check to check again without serving.")
+	}
+	s.log.Info("the start checks passed", "databases", len(s.cfg.Databases))
+	return nil
 }
 
 // buildVersion is the module version from the build info, or (devel) for a build from a working tree.
@@ -74,9 +107,11 @@ func callerFrom(ctx context.Context) (string, bool) {
 	return caller, ok && caller != ""
 }
 
-// ServeStdio checks token once against the configured hashes, and then serves
-// that one caller on t until the client closes it or ctx ends. When the token
-// is missing or matches nothing it returns a sentence and never connects t.
+// ServeStdio checks token once against the configured hashes, runs the start
+// checks, and then serves that one caller on t until the client closes it or
+// ctx ends. When the token is missing or matches nothing it returns a
+// sentence, and it neither connects to a database nor connects t. When a
+// start check refuses, it returns a sentence and never connects t.
 func (s *Server) ServeStdio(ctx context.Context, token string, t mcp.Transport) error {
 	where := "the token of a caller in access.yaml"
 	if s.cfg.Mode == config.Straza {
@@ -89,6 +124,10 @@ func (s *Server) ServeStdio(ctx context.Context, token string, t mcp.Transport) 
 	if !ok {
 		return fmt.Errorf("the token in %s matches no configured hash, so adaptive-pg-mcp will not start. Set %s to %s.", TokenEnv, TokenEnv, where)
 	}
+	if err := s.start(ctx); err != nil {
+		return err
+	}
+	defer s.Close()
 	s.log.Info("serving one caller over stdio", "caller", caller)
 	return s.mcp.Run(context.WithValue(ctx, stdioCallerKey{}, caller), t)
 }

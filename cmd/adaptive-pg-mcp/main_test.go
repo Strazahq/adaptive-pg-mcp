@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -14,6 +15,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/strazahq/adaptive-pg-mcp/internal/config"
 )
@@ -175,12 +178,36 @@ func TestSecretsStayOutOfLogsAndErrors(t *testing.T) {
 	run(context.Background(), []string{"serve", "-config", writeConfig(t, "stdio", "")}, &out, &errs, lookup(environ(knownToken+"!")))
 	keep(errs.String() + out.String())
 
-	// Serve start-up on HTTP and refused requests that carry the known token.
+	// Check and serve on HTTP, while no database of the connection strings can be reached.
+	for _, args := range [][]string{{"check", "-config", good}, {"serve", "-config", good}} {
+		var out, errs bytes.Buffer
+		if code := run(context.Background(), args, &out, &errs, lookup(environ(knownToken))); code != 1 {
+			t.Errorf("%s exited %d while no database can be reached, want 1", args[0], code)
+		}
+		keep(errs.String() + out.String())
+	}
+
+	for _, secret := range []string{password, knownToken} {
+		if strings.Contains(seen.String(), secret) {
+			t.Errorf("a log line, an error or an answer shows %q:\n%s", secret, seen.String())
+		}
+	}
+	if !strings.Contains(seen.String(), "FINANCE_DSN") || !strings.Contains(seen.String(), "the login of sales_eu cannot connect, because the host name of the connection string does not resolve") {
+		t.Errorf("the capture misses the failures it should hold:\n%s", seen.String())
+	}
+}
+
+// serveHTTP runs serve on HTTP with the config at path, sends it requests
+// that carry the known token in ways it must refuse and one it must admit,
+// calls list_databases with the known token, and stops it. It hands every
+// answer and log line to keep.
+func serveHTTP(t *testing.T, path string, env map[string]string, keep func(string)) {
+	t.Helper()
 	logs := newSyncBuffer()
 	ctx, cancel := context.WithCancel(context.Background())
 	exited := make(chan int, 1)
 	go func() {
-		exited <- run(ctx, []string{"serve", "-config", good}, io.Discard, logs, lookup(environ(knownToken)))
+		exited <- run(ctx, []string{"serve", "-config", path}, io.Discard, logs, lookup(env))
 	}()
 	url := waitForAddress(t, logs)
 	refused := []struct {
@@ -212,20 +239,45 @@ func TestSecretsStayOutOfLogsAndErrors(t *testing.T) {
 		}
 		keep(fmt.Sprintf("%s %v %s", r.name, res.Header, body))
 	}
+	keep(listDatabases(t, url))
 	cancel()
 	if code := <-exited; code != 0 {
 		t.Errorf("serve exited %d after its context ended, want 0", code)
 	}
 	keep(logs.String())
+}
 
-	for _, secret := range []string{password, knownToken} {
-		if strings.Contains(seen.String(), secret) {
-			t.Errorf("a log line, an error or an answer shows %q:\n%s", secret, seen.String())
-		}
+// bearer adds the known token to every request of the SDK client.
+type bearer struct{}
+
+// RoundTrip sends r with the known token in its Authorization header.
+func (bearer) RoundTrip(r *http.Request) (*http.Response, error) {
+	r = r.Clone(r.Context())
+	r.Header.Set("Authorization", "Bearer "+knownToken)
+	return http.DefaultTransport.RoundTrip(r)
+}
+
+// listDatabases calls list_databases at url with the known token and returns its text.
+func listDatabases(t *testing.T, url string) string {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	tr := &mcp.StreamableClientTransport{Endpoint: url, HTTPClient: &http.Client{Transport: bearer{}}, MaxRetries: -1}
+	cs, err := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "1"}, nil).Connect(ctx, tr, nil)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
 	}
-	if !strings.Contains(seen.String(), "FINANCE_DSN") || !strings.Contains(seen.String(), "refused an HTTP request") {
-		t.Errorf("the capture misses the failures it should hold:\n%s", seen.String())
+	defer cs.Close()
+	res, err := cs.CallTool(ctx, &mcp.CallToolParams{Name: "list_databases", Arguments: map[string]any{}})
+	if err != nil {
+		t.Fatalf("list_databases: %v", err)
 	}
+	text := res.Content[0].(*mcp.TextContent).Text
+	if res.IsError || text != "list_databases found 1 database: helpdesk." {
+		t.Errorf("list_databases answered %q, want the one database of support_bot", text)
+	}
+	raw, _ := json.Marshal(res.StructuredContent)
+	return text + " " + string(raw)
 }
 
 // waitForAddress waits for serve to log its address and returns the endpoint URL.

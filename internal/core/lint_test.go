@@ -49,6 +49,10 @@ func lintTools(t *testing.T, tools []*mcp.Tool) {
 			}
 		}
 		meta, _ := m["_meta"].(map[string]any)
+		if name == listDatabasesName {
+			lintListing(t, name, meta, ann, in)
+			continue
+		}
 		mark, _ := meta["ai.straza/object"].(map[string]any)
 		if mark["type"] != "database" || mark["argument"] != databaseArg {
 			t.Errorf("tool %s: the mark ai.straza/object is %v, want type database and argument database", name, mark)
@@ -58,6 +62,32 @@ func lintTools(t *testing.T, tools []*mcp.Tool) {
 		if arg["type"] != "string" || !slices.Contains(required(in), databaseArg) {
 			t.Errorf("tool %s: the database argument is not a required string", name)
 		}
+	}
+}
+
+// lintListing fails t when list_databases breaks docs/DESIGN.md section 4: it
+// takes an optional cursor and no database, its mark reaches all databases,
+// and it carries the listing mark and readOnlyHint, as Straza's listing needs.
+func lintListing(t *testing.T, name string, meta, ann, in map[string]any) {
+	t.Helper()
+	mark, _ := meta["ai.straza/object"].(map[string]any)
+	if len(mark) != 2 || mark["type"] != "database" || mark["reach"] != "all" {
+		t.Errorf("tool %s: the mark ai.straza/object is %v, want type database and reach all", name, mark)
+	}
+	lists, _ := meta["ai.straza/lists-objects"].(map[string]any)
+	if len(lists) != 1 || lists["type"] != "database" {
+		t.Errorf("tool %s: the mark ai.straza/lists-objects is %v, want type database", name, lists)
+	}
+	if ann["readOnlyHint"] != true {
+		t.Errorf("tool %s: the listing tool does not set readOnlyHint", name)
+	}
+	props, _ := in["properties"].(map[string]any)
+	if _, ok := props[databaseArg]; ok {
+		t.Errorf("tool %s: the listing tool takes a database argument", name)
+	}
+	cursor, _ := props["cursor"].(map[string]any)
+	if cursor["type"] != "string" || slices.Contains(required(in), "cursor") {
+		t.Errorf("tool %s: cursor is not an optional string", name)
 	}
 }
 

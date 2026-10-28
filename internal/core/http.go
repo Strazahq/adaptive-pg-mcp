@@ -78,8 +78,15 @@ func (s *Server) refuseOrigin(next http.Handler) http.Handler {
 	})
 }
 
-// Serve serves Streamable HTTP on ln until ctx ends, and then stops within shutdownGrace.
+// Serve runs the start checks, and then serves Streamable HTTP on ln until
+// ctx ends and stops within shutdownGrace. When a start check refuses, it
+// closes ln without serving and returns a sentence.
 func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
+	if err := s.start(ctx); err != nil {
+		_ = ln.Close()
+		return err
+	}
+	defer s.Close()
 	hs := &http.Server{
 		Handler:           s.Handler(),
 		ReadHeaderTimeout: readHeaderTimeout,

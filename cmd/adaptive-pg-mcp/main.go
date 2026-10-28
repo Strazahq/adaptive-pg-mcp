@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -25,6 +26,10 @@ Commands:
   adaptive-pg-mcp serve [-config ./server.yaml]
       Serve the databases of server.yaml over stdio or Streamable HTTP, as its listen key says.
       On stdio, the caller's token comes from the environment variable ADAPTIVE_PG_MCP_TOKEN.
+      It runs the start checks first, and does not start when one of them refuses.
+  adaptive-pg-mcp check [-config ./server.yaml]
+      Run the start checks on every login of server.yaml without serving, and print what they find.
+      It exits 1 when serve would refuse to start, so a CI job can run it.
   adaptive-pg-mcp token
       Print a new token and its SHA-256 for access.yaml or gateway_tokens_sha256.
 `
@@ -37,7 +42,7 @@ func main() {
 }
 
 // run runs one command and returns its exit code: 0 on success, 1 when the
-// command fails, and 2 when it is called wrongly. Only token writes to stdout.
+// command fails, and 2 when it is called wrongly. Only token and check write to stdout.
 func run(ctx context.Context, args []string, stdout, stderr io.Writer, getenv func(string) string) int {
 	if len(args) == 0 {
 		fmt.Fprint(stderr, usage)
@@ -46,17 +51,19 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, getenv fu
 	switch args[0] {
 	case "serve":
 		return serve(ctx, args[1:], stderr, getenv)
+	case "check":
+		return check(ctx, args[1:], stdout, stderr, getenv)
 	case "token":
 		return token(args[1:], stdout, stderr)
 	case "help", "-h", "-help", "--help":
 		fmt.Fprint(stdout, usage)
 		return 0
 	}
-	fmt.Fprintf(stderr, "adaptive-pg-mcp has no command %q. Run adaptive-pg-mcp serve or adaptive-pg-mcp token.\n", args[0])
+	fmt.Fprintf(stderr, "adaptive-pg-mcp has no command %q. Run adaptive-pg-mcp serve, adaptive-pg-mcp check or adaptive-pg-mcp token.\n", args[0])
 	return 2
 }
 
-// serve loads the config and serves it on stdio or on the address in listen until ctx ends.
+// serve loads the config, runs the start checks, and serves it on stdio or on the address in listen until ctx ends.
 func serve(ctx context.Context, args []string, stderr io.Writer, getenv func(string) string) int {
 	flags := flag.NewFlagSet("serve", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -90,6 +97,49 @@ func serve(ctx context.Context, args []string, stderr io.Writer, getenv func(str
 		return 1
 	}
 	return 0
+}
+
+// check loads the config and runs the start checks without serving. It prints
+// each finding on stdout as a refusal: or a report: line, then a check: line
+// that says whether serve would start, and exits 1 when it would not.
+func check(ctx context.Context, args []string, stdout, stderr io.Writer, getenv func(string) string) int {
+	flags := flag.NewFlagSet("check", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	path := flags.String("config", "./server.yaml", "the path to server.yaml")
+	if err := flags.Parse(args); err != nil {
+		return 2
+	}
+	if flags.NArg() > 0 {
+		fmt.Fprintf(stderr, "check takes only -config, and it got %q as well. Remove the extra arguments.\n", flags.Args())
+		return 2
+	}
+	cfg, err := config.Load(*path, getenv)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	srv := core.New(cfg, slog.New(slog.NewTextHandler(stderr, nil)))
+	findings := srv.Check(ctx)
+	srv.Close()
+	refused := 0
+	for _, f := range findings {
+		kind := "report: "
+		if f.Refuses {
+			kind = "refusal: "
+			refused++
+		}
+		fmt.Fprintln(stdout, kind+f.Text)
+	}
+	switch refused {
+	case 0:
+		fmt.Fprintln(stdout, "check: no start check refuses, so adaptive-pg-mcp would start.")
+		return 0
+	case 1:
+		fmt.Fprintln(stdout, "check: 1 of the findings above refuses the start, so adaptive-pg-mcp would not start. Fix what it says, and run adaptive-pg-mcp check again.")
+	default:
+		fmt.Fprintln(stdout, "check: "+strconv.Itoa(refused)+" of the findings above refuse the start, so adaptive-pg-mcp would not start. Fix what each refusal says, and run adaptive-pg-mcp check again.")
+	}
+	return 1
 }
 
 // token prints a new token and its SHA-256 on stdout, and how to use them on stderr.
