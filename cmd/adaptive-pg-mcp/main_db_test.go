@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/strazahq/adaptive-pg-mcp/internal/pgtest"
 )
 
@@ -114,7 +116,13 @@ func TestSecretsStayOutOfLogsAndErrorsOnAHarnessDatabase(t *testing.T) {
 			}
 			keep(out.String() + errs.String())
 
-			// serve on HTTP with the right password, refused and admitted requests, and list_databases.
+			// serve on HTTP with the right password, refused and admitted requests, list_databases and the data tools.
+			admin := d.Connect(t)
+			for _, sql := range []string{"CREATE TABLE tickets (id int)", "GRANT SELECT ON tickets TO " + pgx.Identifier{l.Name}.Sanitize()} {
+				if _, err := admin.Exec(t.Context(), sql); err != nil {
+					t.Fatalf("%s: %v", sql, err)
+				}
+			}
 			serveHTTP(t, path, env, keep)
 
 			for _, secret := range []string{password, knownToken, env["SALES_EU_DSN"]} {
@@ -122,7 +130,11 @@ func TestSecretsStayOutOfLogsAndErrorsOnAHarnessDatabase(t *testing.T) {
 					t.Errorf("a log line, an error or an answer shows %q:\n%s", secret, seen.String())
 				}
 			}
-			for _, must := range []string{"password authentication failed for user", "does not exist", "refused an HTTP request", "list_databases found 1 database: helpdesk."} {
+			for _, must := range []string{
+				"password authentication failed for user", "does not exist", "refused an HTTP request", "list_databases found 1 database: helpdesk.",
+				"list_tables found 1 table on helpdesk.", `invalid input syntax for type integer: \"[hidden]\"`, "read_rows found no table public.absent on helpdesk",
+				"support_bot may not use sales_eu", "support_bot may not use query_sql",
+			} {
 				if !strings.Contains(seen.String(), must) {
 					t.Errorf("the capture misses %q, which it should hold:\n%s", must, seen.String())
 				}

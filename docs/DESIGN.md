@@ -127,12 +127,56 @@ string and carries the mark
 | `delete_rows` | `schema`, `table`, `where` (required), `returning` | write |
 | `query_sql` | `sql`, with `free_sql` at read or read-write | read |
 | `execute_sql` | `sql`, with `free_sql` at read-write | write |
+| `execute_ddl` | `sql`, with `free_sql` at read-write | write |
 | one per catalog entry | its params. `database` is an enum of the entry's databases | the entry's login |
 
 A `where` is a list of `{column, op, value}` with `op` from `=`, `<>`, `<`,
 `<=`, `>`, `>=`, `in`, `not in`, `is null`, `is not null`, `like` and
 `ilike`. Identifiers are quoted by the server, and values are bind
-parameters.
+parameters. An `in` or `not in` filter takes at most 1,000 values. A value of
+JSON null binds as SQL NULL, a json or jsonb column takes the value's JSON
+text, and any other column takes the value's text, which Postgres parses as
+the column's type. `schema` is optional and defaults to public, and names
+compare exactly. `order_by` entries are `{column, direction}` with `asc` or
+`desc`, `returning` is a list of columns, and `aggregate` takes `count`,
+`sum`, `avg`, `min` or `max`, with `column` optional for `count`.
+
+Answers write numbers and booleans as JSON numbers and booleans, json as
+itself, dates and timestamps in ISO 8601 with timestamptz in UTC, and every
+other type as its Postgres text. `list_schemas` and `list_tables` page like
+`list_databases`, at most 100 objects or the row cap when it is lower, and
+answer the read shape plus `nextCursor`.
+
+In standalone mode, `tables` entries are `schema.table`, split at the first
+dot. They narrow `describe_table`, `read_rows`, `aggregate` and the write
+tools, `list_schemas` and `list_tables` answer only those tables and their
+schemas, and a caller whose entry lists tables is refused `query_sql`,
+`execute_sql` and `execute_ddl`, because free SQL can reach any table. In
+standalone mode `tools/list` shows a caller only the tools its entry lists,
+with each `database` enum cut to its databases.
+
+`execute_sql` and `execute_ddl` split free SQL by what Postgres reports
+about the statement, never by the SQL text. The statement runs in its
+transaction, and the server reads its command tag and the rows it changed in
+the system catalogs, from `pg_stat_xact_sys_tables` without the TOAST
+schemas. Plain row writes leave that count at 0, and TRUNCATE and changes of
+structure move it, also inside a DO block, a procedure or a function.
+
+- `execute_sql` runs a statement whose tag is INSERT, UPDATE, DELETE, MERGE,
+  SELECT, CALL, DO, EXPLAIN or COPY and that changed no catalog row, under
+  the write cap. Anything else is rolled back and refused.
+- `execute_ddl` runs TRUNCATE and changes of structure, CREATE TABLE AS,
+  SELECT INTO and CREATE MATERIALIZED VIEW AS included. It refuses a
+  row-tagged statement that changed no catalog row, because that is row work
+  for `execute_sql`. Its write cap counts only the rows changed in user tables
+  that existed before the statement, so rows written into a table it creates
+  do not count. REFRESH MATERIALIZED VIEW stays uncapped like TRUNCATE.
+- `insert_rows`, `update_rows` and `delete_rows` refuse a statement that
+  changed catalog rows, which only a trigger on the table can cause.
+
+A refused statement has run until the rollback, so it held its locks for
+that long. Large object functions write a system catalog, so `execute_sql`
+refuses them.
 
 `list_databases` returns `{objects: [{value, id, title}], nextCursor}` in
 `structuredContent`. The value is the config name. The id is the cluster's
@@ -143,29 +187,37 @@ values. A plain login reads the system identifier on 14 to 18, because
 read on the database's read login, and a page with an id that cannot be read
 is a tool error, because an item without an id would hide a database that was
 dropped and created again. The title is the config name. A page holds at most
-25 databases, and `nextCursor` is opaque. A standalone caller sees only the
-databases of its access.yaml entry. The tool carries
+25 databases, and `nextCursor` is opaque. A standalone caller may call it
+only when its access.yaml tools list it, and it sees only the databases of
+its entry. The tool carries
 `ai.straza/object: {type: database, reach: all}`,
 `ai.straza/lists-objects: {type: database}` and `readOnlyHint`.
 
 ## 5. Every call, in order
 
 1. The bearer token matches a configured hash, compared in constant time.
-2. In standalone mode, the caller may use this tool on this database.
-3. The arguments match the input schema.
+2. In standalone mode, the caller may use this tool, then this database.
+3. The arguments match the input schema, and in standalone mode the table is
+   one the caller's entry allows.
 4. When `_meta` carries `ai.straza/object-id`, it must equal the database's
    id read on the connection the call uses. A mismatch refuses the call.
 5. The call runs as one prepared statement in its own transaction, with
    `statement_timeout` from the limits. A read runs in `BEGIN READ ONLY`.
-6. A write that touches more rows than its cap is rolled back and refused. A
-   read stops at the row or byte cap and says where it stopped.
-7. The answer carries `structuredContent` with the column names and types,
+6. A write that touches more rows than its cap is rolled back and refused.
+   The count is the larger of the command tag and the rows the statement
+   inserted, updated and deleted in user tables, with cascades, triggers,
+   functions and WITH queries included, and with `track_counts` off a write
+   is refused. A read stops at the row or byte cap and says where it stopped,
+   and `truncated` is true whenever more rows follow.
+7. Free SQL closes its connection after the call, because a statement can
+   change the session that the pool would hand to the next call.
+8. The answer carries `structuredContent` with the column names and types,
    the rows, and `truncated`. A write answers `rowsAffected` and the
    `returning` rows.
 
 ## 6. Checks before it serves
 
-`serve` refuses to start, and `check` fails, in three cases only:
+`serve` refuses to start, and `check` fails, in four cases only:
 
 - A login is a superuser while `free_sql` is on, and its database does not
   set `allow_superuser: true`. A superuser's free SQL is not limited to the
@@ -175,6 +227,10 @@ databases of its access.yaml entry. The tool carries
   installed, and the database does not set `allow_cross_database: true`.
   Either lets a call reach another database, which breaks the promise that a
   call touches only the database it names.
+- A login of a database reaches another database than the database's read
+  login, by the id of section 4, or the ids cannot be compared because one
+  cannot be read. A call would then touch a database other than the one it
+  names.
 - A catalog statement does not prepare on one of its databases, or its
   parameter count differs from its index.
 
@@ -200,6 +256,44 @@ word for word:
 - `update_rows on helpdesk would change 1,240 rows and the cap is 100, so
   nothing was changed. Narrow the where filter, or ask an administrator to
   raise write_rows.`
+- `delete_rows on helpdesk would change 501 rows and the cap is 100, so
+  nothing was changed. The statement changes rows in other tables through
+  triggers or cascades, so narrow the call, or ask an administrator to raise
+  write_rows.`
+- `execute_sql on helpdesk ran a statement whose command tag is TRUNCATE
+  TABLE, which the write cap cannot count, so it was rolled back and nothing
+  was changed. Use execute_ddl for TRUNCATE and for statements that change
+  structure.`
+- `execute_ddl on helpdesk ran a statement whose command tag is DELETE 1,
+  which works on rows and changed no structure, so it was rolled back and
+  nothing was changed. Use execute_sql to change rows under the write cap, or
+  query_sql to read them.`
+- `execute_sql on helpdesk ran a statement whose command tag is DO and that
+  changed structure, as the system catalogs show, so it was rolled back and
+  nothing was changed. Use execute_ddl for TRUNCATE and for statements that
+  change structure.`
+- `execute_ddl on helpdesk would change 150 rows and the cap is 100, so
+  nothing was changed. Run row changes through execute_sql, or ask an
+  administrator to raise write_rows.`
+- `support_bot may not use update_rows, because its entry in access.yaml
+  does not list that tool, so the call is refused. Use a tool that its entry
+  lists, or ask an administrator to add update_rows to its tools.`
+- `support_bot may not use sales_eu, because its entry in access.yaml does
+  not list that database, so the call is refused. Name a database that
+  list_databases answers, or ask an administrator to add sales_eu to its
+  databases.`
+- `support_bot may not use public.customers on helpdesk, because its entry
+  in access.yaml narrows it to the table public.tickets, so the call is
+  refused. Name that table, or ask an administrator to add public.customers
+  to its tables.`
+- `support_bot may not use query_sql, because its entry in access.yaml
+  narrows it to tables, and free SQL can reach any table, so the call is
+  refused. Use the table tools, such as read_rows, on its tables, or ask an
+  administrator to remove tables from its entry.`
+- `the write login of helpdesk reaches another database than the read login
+  of helpdesk, and its calls would change a database that list_databases does
+  not name, so adaptive-pg-mcp will not start. Point the connection strings
+  in HELPDESK_WRITE_DSN and HELPDESK_READ_DSN at the same database.`
 - `the login of sales_eu is a superuser and free SQL is on, so
   adaptive-pg-mcp will not start. Use a login without superuser, turn
   free_sql off, or set allow_superuser: true for sales_eu.`

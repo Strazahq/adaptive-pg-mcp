@@ -214,7 +214,7 @@ func outputSchema(m catalog.Mode) *jsonschema.Schema {
 		out.Properties["rowsAffected"] = &jsonschema.Schema{Type: "integer", Description: "The number of rows the statement changed."}
 		out.PropertyOrder = []string{"rowsAffected", "columns", "rows"}
 	} else {
-		out.Properties["truncated"] = &jsonschema.Schema{Type: "boolean", Description: "True when the answer stopped at the row or byte cap."}
+		out.Properties["truncated"] = &jsonschema.Schema{Type: "boolean", Description: "True when more rows follow than the answer holds, because of the row cap, the byte cap or the limit of the call."}
 		out.PropertyOrder = []string{"columns", "rows", "truncated"}
 	}
 	out.Required = out.PropertyOrder

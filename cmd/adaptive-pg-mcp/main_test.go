@@ -78,7 +78,7 @@ databases:
 callers:
   - name: support_bot
     token_sha256: "` + hashHex(knownToken) + `"
-    tools: [list_tables, read_rows]
+    tools: [list_databases, list_tables, read_rows]
     databases: [helpdesk]
 `
 	for name, text := range map[string]string{"server.yaml": server, "access.yaml": access} {
@@ -199,8 +199,8 @@ func TestSecretsStayOutOfLogsAndErrors(t *testing.T) {
 
 // serveHTTP runs serve on HTTP with the config at path, sends it requests
 // that carry the known token in ways it must refuse and one it must admit,
-// calls list_databases with the known token, and stops it. It hands every
-// answer and log line to keep.
+// calls list_databases and the data tools with the known token, and stops
+// it. It hands every answer and log line to keep.
 func serveHTTP(t *testing.T, path string, env map[string]string, keep func(string)) {
 	t.Helper()
 	logs := newSyncBuffer()
@@ -240,6 +240,7 @@ func serveHTTP(t *testing.T, path string, env map[string]string, keep func(strin
 		keep(fmt.Sprintf("%s %v %s", r.name, res.Header, body))
 	}
 	keep(listDatabases(t, url))
+	keep(dataTools(t, url))
 	cancel()
 	if code := <-exited; code != 0 {
 		t.Errorf("serve exited %d after its context ended, want 0", code)
@@ -278,6 +279,41 @@ func listDatabases(t *testing.T, url string) string {
 	}
 	raw, _ := json.Marshal(res.StructuredContent)
 	return text + " " + string(raw)
+}
+
+// dataTools calls the data tools at url with the known token, in calls that
+// pass, that access.yaml refuses, and that Postgres refuses with the known
+// password in a value, which its answer would repeat. It returns every text.
+func dataTools(t *testing.T, url string) string {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	tr := &mcp.StreamableClientTransport{Endpoint: url, HTTPClient: &http.Client{Transport: bearer{}}, MaxRetries: -1}
+	cs, err := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "1"}, nil).Connect(ctx, tr, nil)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer cs.Close()
+	calls := []struct {
+		tool string
+		args map[string]any
+	}{
+		{"list_tables", map[string]any{"database": "helpdesk"}},
+		{"read_rows", map[string]any{"database": "helpdesk", "table": "tickets", "where": []any{map[string]any{"column": "id", "op": "=", "value": password}}}},
+		{"read_rows", map[string]any{"database": "helpdesk", "table": "absent"}},
+		{"read_rows", map[string]any{"database": "sales_eu", "table": "tickets"}},
+		{"query_sql", map[string]any{"database": "helpdesk", "sql": "SELECT '" + password + "'"}},
+	}
+	var texts strings.Builder
+	for _, c := range calls {
+		res, err := cs.CallTool(ctx, &mcp.CallToolParams{Name: c.tool, Arguments: c.args})
+		if err != nil {
+			t.Fatalf("%s: %v", c.tool, err)
+		}
+		raw, _ := json.Marshal(res)
+		texts.WriteString(string(raw) + "\n")
+	}
+	return texts.String()
 }
 
 // waitForAddress waits for serve to log its address and returns the endpoint URL.

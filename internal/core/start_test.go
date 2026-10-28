@@ -320,7 +320,7 @@ func TestStartChecks(t *testing.T) {
 			want: func(env) []Finding {
 				return []Finding{
 					refuses("the write login of helpdesk reaches a database that has dblink installed, which lets a call reach another database, so adaptive-pg-mcp will not start. Drop the extension from that database, or set allow_cross_database: true for helpdesk."),
-					reports(elsewhere("the write login of helpdesk")),
+					refuses(elsewhere("the write login of helpdesk", "HELPDESK_WRITE_DSN")),
 				}
 			},
 		},
@@ -333,7 +333,7 @@ func TestStartChecks(t *testing.T) {
 			want: func(env) []Finding {
 				return []Finding{
 					reports("the write login of helpdesk reaches a database that has dblink installed, which allow_cross_database: true accepts for helpdesk. A call can reach another database through it."),
-					reports(elsewhere("the write login of helpdesk")),
+					refuses(elsewhere("the write login of helpdesk", "HELPDESK_WRITE_DSN")),
 				}
 			},
 		},
@@ -346,7 +346,7 @@ func TestStartChecks(t *testing.T) {
 			want: func(env) []Finding {
 				return []Finding{
 					refuses("the finance_reader login of helpdesk reaches a database that has postgres_fdw installed, which lets a call reach another database, so adaptive-pg-mcp will not start. Drop the extension from that database, or set allow_cross_database: true for helpdesk."),
-					reports(elsewhere("the finance_reader login of helpdesk")),
+					refuses(elsewhere("the finance_reader login of helpdesk", "HELPDESK_FINANCE_DSN")),
 				}
 			},
 		},
@@ -359,7 +359,7 @@ func TestStartChecks(t *testing.T) {
 			want: func(env) []Finding {
 				return []Finding{
 					reports("the finance_reader login of helpdesk reaches a database that has postgres_fdw installed, which allow_cross_database: true accepts for helpdesk. A call can reach another database through it."),
-					reports(elsewhere("the finance_reader login of helpdesk")),
+					refuses(elsewhere("the finance_reader login of helpdesk", "HELPDESK_FINANCE_DSN")),
 				}
 			},
 		},
@@ -372,7 +372,7 @@ func TestStartChecks(t *testing.T) {
 			},
 			want: func(env) []Finding {
 				return []Finding{
-					reports(idUnreadable("the read login of helpdesk", "helpdesk")),
+					refuses(readIDRefused("helpdesk")),
 					refuses("the write login of helpdesk reaches a database that has dblink installed, which lets a call reach another database, so adaptive-pg-mcp will not start. Drop the extension from that database, or set allow_cross_database: true for helpdesk."),
 				}
 			},
@@ -385,19 +385,65 @@ func TestStartChecks(t *testing.T) {
 			},
 			want: func(env) []Finding {
 				return []Finding{
-					reports(idUnreadable("the read login of helpdesk", "helpdesk")),
-					reports(idUnreadable("the write login of helpdesk", "helpdesk")),
+					refuses(readIDRefused("helpdesk")),
+					refuses(loginIDRefused("the write login of helpdesk", "helpdesk")),
 					refuses("helpdesk has dblink installed, which lets a call reach another database, so adaptive-pg-mcp will not start. Drop the extension from helpdesk, or set allow_cross_database: true for helpdesk."),
 				}
 			},
 		},
 		{
-			name: "a write login that reaches another database is reported", freeSQL: "off", databases: separate, another: true,
+			name: "a write login that reaches another database refuses the start", freeSQL: "off", databases: separate, another: true,
 			dsns: func(e env) map[string]string {
 				return map[string]string{"HELPDESK_READ_DSN": e.l.plain.DSN(t, e.d), "HELPDESK_WRITE_DSN": e.l.other.DSN(t, e.another)}
 			},
 			want: func(env) []Finding {
-				return []Finding{reports(elsewhere("the write login of helpdesk"))}
+				return []Finding{refuses(elsewhere("the write login of helpdesk", "HELPDESK_WRITE_DSN"))}
+			},
+		},
+		{
+			name: "a catalog login that reaches another database refuses the start", freeSQL: "off", databases: extra, another: true,
+			dsns: func(e env) map[string]string {
+				return map[string]string{"HELPDESK_READ_DSN": e.l.plain.DSN(t, e.d), "HELPDESK_WRITE_DSN": e.l.other.DSN(t, e.d), "HELPDESK_FINANCE_DSN": e.l.monitor.DSN(t, e.another)}
+			},
+			want: func(env) []Finding {
+				return []Finding{refuses(elsewhere("the finance_reader login of helpdesk", "HELPDESK_FINANCE_DSN"))}
+			},
+		},
+		{
+			name: "a write and a catalog login on the read login's database pass", freeSQL: "off", databases: extra,
+			dsns: func(e env) map[string]string {
+				return map[string]string{"HELPDESK_READ_DSN": e.l.plain.DSN(t, e.d), "HELPDESK_WRITE_DSN": e.l.other.DSN(t, e.d), "HELPDESK_FINANCE_DSN": e.l.monitor.DSN(t, e.d)}
+			},
+			want: func(env) []Finding { return nil },
+		},
+		{
+			name: "a write login that cannot read the id refuses the start", freeSQL: "off", databases: separate,
+			sql: []string{"REVOKE EXECUTE ON FUNCTION pg_control_system() FROM PUBLIC", "GRANT EXECUTE ON FUNCTION pg_control_system() TO {plain}"},
+			dsns: func(e env) map[string]string {
+				return map[string]string{"HELPDESK_READ_DSN": e.l.plain.DSN(t, e.d), "HELPDESK_WRITE_DSN": e.l.other.DSN(t, e.d)}
+			},
+			want: func(env) []Finding {
+				return []Finding{refuses(loginIDRefused("the write login of helpdesk", "helpdesk"))}
+			},
+		},
+		{
+			name: "a read login that cannot read the id refuses the start", freeSQL: "off", databases: separate,
+			sql: []string{"REVOKE EXECUTE ON FUNCTION pg_control_system() FROM PUBLIC", "GRANT EXECUTE ON FUNCTION pg_control_system() TO {other}"},
+			dsns: func(e env) map[string]string {
+				return map[string]string{"HELPDESK_READ_DSN": e.l.plain.DSN(t, e.d), "HELPDESK_WRITE_DSN": e.l.other.DSN(t, e.d)}
+			},
+			want: func(env) []Finding {
+				return []Finding{refuses(readIDRefused("helpdesk"))}
+			},
+		},
+		{
+			name: "a catalog login that cannot read the id refuses the start", freeSQL: "off", databases: extra,
+			sql: []string{"REVOKE EXECUTE ON FUNCTION pg_control_system() FROM PUBLIC", "GRANT EXECUTE ON FUNCTION pg_control_system() TO {plain}, {other}"},
+			dsns: func(e env) map[string]string {
+				return map[string]string{"HELPDESK_READ_DSN": e.l.plain.DSN(t, e.d), "HELPDESK_WRITE_DSN": e.l.other.DSN(t, e.d), "HELPDESK_FINANCE_DSN": e.l.monitor.DSN(t, e.d)}
+			},
+			want: func(env) []Finding {
+				return []Finding{refuses(loginIDRefused("the finance_reader login of helpdesk", "helpdesk"))}
 			},
 		},
 	}
@@ -432,9 +478,19 @@ func idUnreadable(login, db string) string {
 	return login + " cannot read the id of " + db + ", because the server answered: permission denied for function pg_control_system (SQLSTATE 42501), so list_databases fails and every call that carries an ai.straza/object-id is refused on this login. Grant EXECUTE on the function pg_control_system() to the login, or restore the default grant to PUBLIC."
 }
 
-// elsewhere is the report about a login of helpdesk that reaches another database than its read login.
-func elsewhere(login string) string {
-	return login + " reaches another database than the read login of helpdesk, so its calls can change a database that list_databases does not name. Point both connection strings at the same database."
+// elsewhere is the refusal of a login of helpdesk, whose connection string is in env, that reaches another database than its read login.
+func elsewhere(login, env string) string {
+	return login + " reaches another database than the read login of helpdesk, and its calls would change a database that list_databases does not name, so adaptive-pg-mcp will not start. Point the connection strings in " + env + " and HELPDESK_READ_DSN at the same database."
+}
+
+// readIDRefused is the refusal of a database with more than one login whose read login cannot read the system identifier.
+func readIDRefused(db string) string {
+	return "the read login of " + db + " cannot read the id of " + db + ", because the server answered: permission denied for function pg_control_system (SQLSTATE 42501), and without it adaptive-pg-mcp cannot check that the other logins of " + db + " reach the same database, so adaptive-pg-mcp will not start. Grant EXECUTE on the function pg_control_system() to the login, or restore the default grant to PUBLIC."
+}
+
+// loginIDRefused is the refusal of a login other than the read login of a database that cannot read the system identifier.
+func loginIDRefused(login, db string) string {
+	return login + " cannot read the id of " + db + ", because the server answered: permission denied for function pg_control_system (SQLSTATE 42501), and without it adaptive-pg-mcp cannot check that the login reaches the same database as the read login of " + db + ", so adaptive-pg-mcp will not start. Grant EXECUTE on the function pg_control_system() to the login, or restore the default grant to PUBLIC."
 }
 
 // sameFindings reports whether two lists of findings are equal, sentence for sentence.

@@ -39,8 +39,8 @@ func standaloneConfig() *config.Config {
 		Mode:   config.Standalone,
 		Listen: "127.0.0.1:0",
 		Callers: []config.Caller{
-			{Name: "support_bot", TokenSHA256: hashOf(tokenA), Tools: []string{"read_rows"}, Databases: []string{"helpdesk"}},
-			{Name: "ops_bot", TokenSHA256: hashOf(tokenB), Tools: []string{"read_rows"}, Databases: []string{"helpdesk"}},
+			{Name: "support_bot", TokenSHA256: hashOf(tokenA), Tools: []string{"list_databases", "read_rows"}, Databases: []string{"helpdesk"}},
+			{Name: "ops_bot", TokenSHA256: hashOf(tokenB), Tools: []string{"list_databases", "read_rows"}, Databases: []string{"helpdesk"}},
 		},
 	}
 }

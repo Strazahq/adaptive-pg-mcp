@@ -128,12 +128,16 @@ func (s *Server) Close() {
 	}
 }
 
-// checkDatabase checks every login of one database and then the database itself.
+// checkDatabase checks every login of one database and then the database
+// itself. Every login of a database with more than one must reach the
+// database of its read login, by the id, or the start is refused, because
+// list_databases names the read login's database.
 func (s *Server) checkDatabase(ctx context.Context, name string, db config.Database) []Finding {
 	var results []loginResult
 	var findings []Finding
-	for _, ref := range loginsOf(name, db) {
-		r := s.checkLogin(ctx, ref, db)
+	refs := loginsOf(name, db)
+	for _, ref := range refs {
+		r := s.checkLogin(ctx, ref, db, len(refs) == 1)
 		results = append(results, r)
 		findings = append(findings, r.findings...)
 	}
@@ -141,14 +145,34 @@ func (s *Server) checkDatabase(ctx context.Context, name string, db config.Datab
 	read := results[0]
 	for _, r := range results[1:] {
 		if read.id != "" && r.id != "" && r.id != read.id {
-			findings = append(findings, Finding{Text: r.ref.label + " reaches another database than " + read.ref.label + ", so its calls can change a database that list_databases does not name. Point both connection strings at the same database."})
+			findings = append(findings, Finding{Refuses: true, Text: r.ref.label + " reaches another database than " + read.ref.label + ", and its calls would change a database that list_databases does not name, so adaptive-pg-mcp will not start. Point the connection strings in " + r.ref.login.Env + " and " + read.ref.login.Env + " at the same database."})
 		}
 	}
 	return findings
 }
 
-// checkLogin connects to one login and reads its posture and the database id on it.
-func (s *Server) checkLogin(ctx context.Context, ref loginRef, db config.Database) loginResult {
+// idGrant is what restores the read of a database id to a login.
+const idGrant = " Grant EXECUTE on the function pg_control_system() to the login, or restore the default grant to PUBLIC."
+
+// unreadableID is the finding about a login whose checks ran but that cannot
+// read the id of its database. A database with one login is reported,
+// because nothing needs comparing. In a database with more than one, it
+// refuses the start, because the logins cannot be compared with the read
+// login, and a check that cannot run is a check that never happened.
+func unreadableID(ref loginRef, alone bool, reason string) Finding {
+	cannot := ref.label + " cannot read the id of " + ref.db + ", because " + reason
+	switch {
+	case alone:
+		return Finding{Text: cannot + ", so list_databases fails and every call that carries an " + objectIDKey + " is refused on this login." + idGrant}
+	case ref.role == "read":
+		return Finding{Refuses: true, Text: cannot + ", and without it adaptive-pg-mcp cannot check that the other logins of " + ref.db + " reach the same database, so adaptive-pg-mcp will not start." + idGrant}
+	}
+	return Finding{Refuses: true, Text: cannot + ", and without it adaptive-pg-mcp cannot check that the login reaches the same database as the read login of " + ref.db + ", so adaptive-pg-mcp will not start." + idGrant}
+}
+
+// checkLogin connects to one login and reads its posture and the database
+// id on it. alone is true when the login is the only one of its database.
+func (s *Server) checkLogin(ctx context.Context, ref loginRef, db config.Database, alone bool) loginResult {
 	r := loginResult{ref: ref}
 	logins := make([]pg.Login, len(ref.roles))
 	for i, role := range ref.roles {
@@ -182,7 +206,7 @@ func (s *Server) checkLogin(ctx context.Context, ref loginRef, db config.Databas
 
 	r.id, err = s.readIDOn(ctx, logins[0])
 	if err != nil {
-		r.findings = append(r.findings, Finding{Text: ref.label + " cannot read the id of " + ref.db + ", because " + s.pools.Reason(err) + ", so list_databases fails and every call that carries an " + objectIDKey + " is refused on this login. Grant EXECUTE on the function pg_control_system() to the login, or restore the default grant to PUBLIC."})
+		r.findings = append(r.findings, unreadableID(ref, alone, s.pools.Reason(err)))
 	}
 	return r
 }

@@ -89,15 +89,20 @@ func listDatabasesTool() *mcp.Tool {
 
 // listDatabases answers one page of list_databases: the databases the
 // caller may use, by config name, each with the id read on its read login.
+// In mode standalone the caller's access.yaml entry must list the tool,
+// which is checked before the arguments are read.
 // A database whose id cannot be read fails the whole page, because a listing
 // with an item that lacks its id would let a database dropped and created
 // again look like the old one.
 func (s *Server) listDatabases(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	caller, _ := callerFrom(ctx)
+	if err := s.authorizeTool(caller, listDatabasesName, false); err != nil {
+		return toolError(err), nil
+	}
 	cursor, given, err := listArgs(req.Params.Arguments)
 	if err != nil {
 		return toolError(err), nil
 	}
-	caller, _ := callerFrom(ctx)
 	names := s.databasesOf(caller)
 	start := 0
 	if given {

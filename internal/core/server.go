@@ -33,13 +33,15 @@ type Server struct {
 	page int
 }
 
-// New builds the server for cfg with its built-in tools. It connects to no
+// New builds the server for cfg with its built-in tools: list_databases,
+// the read and write tools, and the free SQL tools that free_sql allows. It connects to no
 // database until Check, Serve or ServeStdio runs.
 func New(cfg *config.Config, log *slog.Logger) *Server {
 	s := &Server{cfg: cfg, log: log, creds: credentials(cfg), page: listPage}
 	s.mcp = mcp.NewServer(&mcp.Implementation{Name: serverName, Version: buildVersion()}, &mcp.ServerOptions{Logger: log})
-	s.mcp.AddReceivingMiddleware(identify)
+	s.mcp.AddReceivingMiddleware(identify, s.filterTools)
 	s.mcp.AddTool(listDatabasesTool(), s.listDatabases)
+	s.addDataTools()
 	return s
 }
 

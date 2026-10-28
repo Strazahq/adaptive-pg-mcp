@@ -39,6 +39,9 @@ const (
 	ReadWrite
 )
 
+// closeTimeout bounds the close of a connection that Run does not return to its pool.
+const closeTimeout = 5 * time.Second
+
 // Pools holds one connection pool per login. It connects to a login the first time a call runs on it.
 type Pools struct {
 	pools map[Login]*pgxpool.Pool
@@ -89,7 +92,8 @@ func (p *Pools) Close() {
 // BEGIN READ ONLY. Its first statement sets
 // statement_timeout to timeout for this transaction only, through a bind
 // parameter. Run commits when fn returns nil, and rolls back and returns the
-// error of fn unchanged otherwise. Every failure of Run itself is an *Error,
+// error of fn unchanged otherwise. The connection goes back to the pool,
+// unless fn called Tx.Discard. Every failure of Run itself is an *Error,
 // whose text holds no connection string and no password.
 func (p *Pools) Run(ctx context.Context, l Login, access Access, timeout time.Duration, fn func(*Tx) error) error {
 	pool, ok := p.pools[l]
@@ -100,7 +104,16 @@ func (p *Pools) Run(ctx context.Context, l Login, access Access, timeout time.Du
 	if err != nil {
 		return p.wrap(err, true)
 	}
-	defer conn.Release()
+	t := &Tx{}
+	defer func() {
+		if !t.discard {
+			conn.Release()
+			return
+		}
+		closing, cancel := context.WithTimeout(context.Background(), closeTimeout)
+		_ = conn.Hijack().Close(closing)
+		cancel()
+	}()
 
 	opts := pgx.TxOptions{AccessMode: pgx.ReadOnly}
 	if access == ReadWrite {
@@ -110,7 +123,7 @@ func (p *Pools) Run(ctx context.Context, l Login, access Access, timeout time.Du
 	if err != nil {
 		return p.wrap(err, false)
 	}
-	t := &Tx{tx: tx}
+	t.tx = tx
 	if err := t.setTimeout(ctx, timeout); err != nil {
 		_ = tx.Rollback(ctx)
 		return p.wrap(err, false)
@@ -128,7 +141,15 @@ func (p *Pools) Run(ctx context.Context, l Login, access Access, timeout time.Du
 // Tx is one transaction on one connection, open for the length of a Run.
 type Tx struct {
 	tx pgx.Tx
+	// discard is true when Run closes the connection instead of returning it to the pool.
+	discard bool
 }
+
+// Discard makes Run close the connection of t once its transaction ends,
+// instead of returning it to the pool. A statement that is not the server's
+// own can change its session, such as its role, its search_path or a
+// temporary table, and a closed connection carries none of it into a later call.
+func (t *Tx) Discard() { t.discard = true }
 
 // Query sends sql with args as one unnamed prepared statement on the extended
 // protocol and returns its rows, which the caller closes. It is the one path

@@ -5,10 +5,10 @@ version: 1
 callers:
   - name: support_bot
     token_sha256: "0000000000000000000000000000000000000000000000000000000000000001"
-    tools: [list_tables, describe_table, read_rows, insert_rows]
+    tools: [list_databases, list_tables, describe_table, read_rows, insert_rows]
     databases: [helpdesk]
     tables: [public.tickets]
   - name: analyst
     token_sha256: "0000000000000000000000000000000000000000000000000000000000000002"
-    tools: [list_schemas, list_tables, describe_table, read_rows, aggregate, query_sql]
+    tools: [list_databases, list_schemas, list_tables, describe_table, read_rows, aggregate, query_sql]
     databases: [sales_eu]

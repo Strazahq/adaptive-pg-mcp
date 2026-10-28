@@ -17,17 +17,22 @@ Made by the owner on 2026-10-28:
 1. The name is adaptive-pg-mcp, in the Strazahq organization, under
    Apache-2.0. The repository is private for now.
 2. Write tools and free SQL are in v1. Behind Straza, a policy can hold
-   `execute_sql` for a person's approval.
+   `execute_sql` for a person's approval. Free SQL that changes rows goes
+   through `execute_sql` under the write cap, and TRUNCATE and changes of
+   structure go through `execute_ddl`, which has no row cap, so a policy can
+   hold structure changes alone.
 3. An organization's SQL stays in its own `.sql` files, and a small index
    says which statements become tools.
 4. How an operator configures Straza, approval binding included, is the
    operator's call. The server does not check Straza settings.
 5. One powerful login per database is the common setup and works. Separate
    read and write logins are the hardened option.
-6. The server refuses to start in three cases only: a superuser with free SQL
-   on, dblink or postgres_fdw installed, and a catalog statement that fails.
-   The first two each have one config key that accepts them. Everything else
-   is reported.
+6. The server refuses to start in four cases only: a superuser with free SQL
+   on, dblink or postgres_fdw installed, a login that reaches another
+   database than its database's read login, and a catalog statement that
+   fails. A member of a superuser role counts as a superuser. The first two
+   each have one config key that accepts them. A login that cannot connect
+   refuses under invariant 8. Everything else is reported.
 7. Go on the official MCP go-sdk and pgx, Postgres 14 to 18, the newest MCP
    revision always (docs/MCP-REVISION, enforced by tools/specgate.sh).
 
