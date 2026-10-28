@@ -5,7 +5,6 @@ tools/stategate.sh enforces it. Close an item by deleting its line.
 
 ## P owner actions
 
-- P-002 waiting-owner env | The box runs Go 1.26.5, in which govulncheck finds ten standard library vulnerabilities that 1.26.10 fixes, so the push gate refuses until Go on the box is updated or go.mod names a newer toolchain. | go.mod | [live 10-28]
 
 ## Q queue
 

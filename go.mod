@@ -2,6 +2,8 @@ module github.com/strazahq/adaptive-pg-mcp
 
 go 1.25.0
 
+toolchain go1.27.3
+
 require (
 	github.com/google/jsonschema-go v0.4.3
 	github.com/modelcontextprotocol/go-sdk v1.8.0
