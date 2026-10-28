@@ -1,5 +1,6 @@
 #!/bin/sh
-# Push gate: secrets, known vulnerabilities and the MCP specification revision.
+# Push gate: secrets, known vulnerabilities, the database tests on Postgres 14
+# to 18 and the MCP specification revision.
 # A missing scanner refuses the push, because a skipped scan is a scan that
 # never happened.
 set -u
@@ -27,6 +28,26 @@ if [ -f go.mod ]; then
   need osv-scanner "go install github.com/google/osv-scanner/v2/cmd/osv-scanner@latest"
   if ! osv-scanner scan source -r . >/dev/null 2>&1; then
     echo "gate: osv-scanner reports a known vulnerability in a dependency. Run osv-scanner scan source -r . and update it." >&2
+    exit 1
+  fi
+
+  # The database tests run on the Postgres 14 to 18 harness, which is removed
+  # again whatever the tests do, also when the push is interrupted.
+  trap 'sh tools/pg.sh down >/dev/null 2>&1; exit 1' INT TERM HUP
+  if ! sh tools/pg.sh up; then
+    sh tools/pg.sh down >/dev/null 2>&1
+    echo "gate: the Postgres 14 to 18 harness did not start, so the push is refused. Fix what tools/pg.sh printed above and push again." >&2
+    exit 1
+  fi
+  go test -tags pg ./... >/dev/null 2>&1
+  tested=$?
+  if ! sh tools/pg.sh down; then
+    echo "gate: the Postgres 14 to 18 harness was not removed, so the push is refused. Fix what tools/pg.sh printed above and run sh tools/pg.sh down." >&2
+    exit 1
+  fi
+  trap - INT TERM HUP
+  if [ "$tested" -ne 0 ]; then
+    echo "gate: a database test fails on Postgres 14 to 18. Run make pgtest and read the first FAIL." >&2
     exit 1
   fi
 fi

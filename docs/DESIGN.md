@@ -173,8 +173,12 @@ database dropped and created again under the same name is refused.
 
 Table-driven, test-first for the token check, the id check and the start
 checks. Every package test that touches a database runs against Postgres 14
-to 18 in local Docker. The authorization test runs on
-every protocol revision the SDK serves.
+to 18 in local Docker. Such a test carries the build constraint
+`//go:build pg` and gets its servers from internal/pgtest. Plain
+`go test ./...` in the commit gate needs no Docker, and `make pgtest` and the
+push gate run `go test -tags pg ./...` against the five servers that
+`sh tools/pg.sh up` starts. The authorization test runs on every protocol
+revision the SDK serves.
 
 ## 10. Not in v1
 

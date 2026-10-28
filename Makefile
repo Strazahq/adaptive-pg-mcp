@@ -1,4 +1,4 @@
-.PHONY: hooks check gate text state gogate go spec security
+.PHONY: hooks check gate text state gogate go spec security pgtest
 
 # Bind the gate once per clone. The hooks live in the tree so they travel.
 hooks:
@@ -22,6 +22,14 @@ gogate:
 
 go:
 	@if [ -f go.mod ]; then gofmt -l . && go vet ./... && go test ./... ; else echo "go: no module yet"; fi
+
+# The database tests on Postgres 14 to 18 in local Docker, as the push gate runs them.
+# The harness is always removed again, also when a test fails.
+pgtest:
+	@sh tools/pg.sh up || { sh tools/pg.sh down; exit 1; }; \
+	status=0; go test -tags pg ./... || status=$$?; \
+	sh tools/pg.sh down || status=1; \
+	exit $$status
 
 # The MCP specification revision and the go-sdk release, as the push gate checks them.
 spec:
