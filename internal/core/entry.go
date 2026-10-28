@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"path"
 	"slices"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -21,7 +22,8 @@ var builtinNames = []string{
 
 // checkCatalog is the catalog part of the start checks of docs/DESIGN.md
 // section 6. It loads the catalog folder of server.yaml, reports each
-// statement that no index lists, prepares every indexed statement on each of
+// statement that no index lists and each cap that an entry raises above
+// server.yaml, prepares every indexed statement on each of
 // its databases through catalog.Check, and serves the tool of each entry
 // that passes. A catalog that does not load refuses the start, and so do the
 // refusals of catalog.Check and an entry that Tool cannot turn into a tool.
@@ -38,6 +40,9 @@ func (s *Server) checkCatalog(ctx context.Context, ready map[pg.Login]bool) []Fi
 		}
 		for _, r := range reports {
 			findings = append(findings, Finding{Text: r})
+		}
+		for _, e := range entries {
+			findings = append(findings, raisedLimits(s.cfg.Limits, e)...)
 		}
 		typed, refusals := catalog.Check(ctx, s.pools, s.cfg.Limits.Timeout, entries, ready)
 		for _, r := range refusals {
@@ -90,6 +95,34 @@ func entryLimits(server config.Limits, own *catalog.Limits) config.Limits {
 		server.WriteRows = own.WriteRows
 	}
 	return server
+}
+
+// raisedLimits reports each cap that the limits of entry e raise above
+// server, the limits of server.yaml, field by field. An entry may raise a
+// cap, and the report lets the operator see where a tool goes past the cap
+// of the built-in tools.
+func raisedLimits(server config.Limits, e catalog.Entry) []Finding {
+	if e.Limits == nil {
+		return nil
+	}
+	at := path.Join(path.Dir(e.Source), "tools.yaml") + " entry " + e.Name + " raises limits."
+	var findings []Finding
+	raise := func(field, to, from string) {
+		findings = append(findings, Finding{Text: at + field + " to " + to + ", above the " + from + " that server.yaml sets, so its calls may go past the cap of the built-in tools. Lower it in the entry if that is not intended."})
+	}
+	if e.Limits.Rows > server.Rows {
+		raise("rows", count(int64(e.Limits.Rows)), count(int64(server.Rows)))
+	}
+	if e.Limits.Bytes > server.Bytes {
+		raise("bytes", count(int64(e.Limits.Bytes)), count(int64(server.Bytes)))
+	}
+	if e.Limits.Timeout > server.Timeout {
+		raise("timeout", e.Limits.Timeout.String(), server.Timeout.String())
+	}
+	if e.Limits.WriteRows > server.WriteRows {
+		raise("write_rows", count(int64(e.Limits.WriteRows)), count(int64(server.WriteRows)))
+	}
+	return findings
 }
 
 // narrowEntry is the advice of a catalog read that stopped at its row or byte cap.

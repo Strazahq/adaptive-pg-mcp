@@ -133,7 +133,13 @@ load: an entry without a statement, two statements with one name anywhere in
 the catalog, an entry with the name of a built-in tool, an entry that names a
 database that server.yaml does not define or a login that its database does
 not have, and a statement that holds no SQL. The catalog reads only files
-inside its folder, and a link to a file outside it fails the load. An entry
+inside its folder. It skips files and folders whose name starts with a dot,
+so a Kubernetes ConfigMap mount loads each statement once, and it reads each
+real folder once. It follows a link to a folder, a `.sql` file or a
+`tools.yaml` only when the link is relative and stays inside the folder at
+every step, and such a link that does not fails the load. Other links are
+ignored, as other files are. An entry's `limits` may raise or lower the caps
+of server.yaml, and the start reports each cap an entry raises. An entry
 the core cannot turn into a tool refuses the start once Postgres has reported
 its types, such as one whose name is not snake_case or whose parameter has a
 Postgres type outside the supported list. examples/catalog holds a catalog

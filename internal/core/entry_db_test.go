@@ -113,6 +113,7 @@ tools:
     mode: read
     databases: [sales_eu, sales_us]
     login: read
+    limits: { rows: 5000, timeout: 2m, write_rows: 50 }
   revenue_of_region:
     description: Sums net revenue of one region for one month. One row.
     mode: read
@@ -153,6 +154,8 @@ tools:
 	}
 	want := []Finding{
 		reports("finance/revenue.sql statement revenue_draft is not a tool, because finance/tools.yaml has no entry for it. Add an entry to serve it."),
+		reports("finance/tools.yaml entry revenue_months raises limits.rows to 5,000, above the 1,000 that server.yaml sets, so its calls may go past the cap of the built-in tools. Lower it in the entry if that is not intended."),
+		reports("finance/tools.yaml entry revenue_months raises limits.timeout to 2m0s, above the 30s that server.yaml sets, so its calls may go past the cap of the built-in tools. Lower it in the entry if that is not intended."),
 		refuses(`finance/revenue.sql statement revenue_by_region does not prepare on sales_us: the server answered: column "net" does not exist (SQLSTATE 42703). Fix the statement or remove sales_us from its databases.`),
 		refuses("finance/revenue.sql statement revenue_of_region takes 2 parameters on sales_eu, and its index lists 1. List each parameter of the statement in params, in $1 order."),
 		refuses("finance/revenue.sql statement tickets_since has parameter $1 after of type int4 on sales_eu and of type int8 on sales_us, and a tool argument takes one type. Make the types match, or cast the parameter in the statement, such as $1::int4."),

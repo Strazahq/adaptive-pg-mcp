@@ -24,6 +24,15 @@ $hits"
 tells='\b(delv(e|es|ing)|leverag(e|es|ing)|seamless(ly)?|robust(ly|ness)?|cutting-edge|game[- ]changer|unlock(s|ing)?|empower(s|ing)?|streamlin(e|es|ing)|tapestry|elevat(e|es|ing)|supercharge|effortless(ly)?|state-of-the-art|best-in-class|world-class|revolutioni[sz]e|paradigm|synergy|holistic)\b'
 phrases="it'?s worth noting|it is worth noting|in today'?s|let'?s dive|dive into|harness the power|the landscape of|navigate the|great question|as an ai|in conclusion|comprehensive suite|a testament to"
 hits=$(printf '%s\n' "$files" | xargs grep -n -i -E "$tells|$phrases" 2>/dev/null)
+# In Go code the mutex methods Unlock and RUnlock are names, not filler, so a
+# Go line counts only when it still matches with those calls taken out.
+hits=$(printf '%s\n' "$hits" | while IFS= read -r h; do
+  [ -z "$h" ] && continue
+  case "${h%%:*}" in
+    *.go) printf '%s\n' "$h" | sed -E 's/\bR?Unlock\(//g' | grep -q -i -E "$tells|$phrases" || continue ;;
+  esac
+  printf '%s\n' "$h"
+done)
 [ -n "$hits" ] && report "textgate: filler or marketing words. Say the plain thing instead.
 $hits"
 

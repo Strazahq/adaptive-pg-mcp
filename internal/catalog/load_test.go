@@ -280,8 +280,41 @@ func TestLoadRefusesAFolderItCannotRead(t *testing.T) {
 	if err := os.Symlink(filepath.Join(outside, "revenue.sql"), filepath.Join(linked, "finance", "revenue.sql")); err != nil {
 		t.Fatal(err)
 	}
-	cases = append(cases, struct{ name, dir, want string }{"a link to a file outside the folder", linked,
-		"adaptive-pg-mcp cannot read finance/revenue.sql in the catalog folder " + linked + ": " + readErr(linked, "finance/revenue.sql") + ". Make it a file inside the catalog folder that the user who runs adaptive-pg-mcp can read, or remove it."})
+	absolute := func(rel, dir string) string {
+		return rel + " is a link to an absolute path, and adaptive-pg-mcp follows only relative links that stay inside the catalog folder " + dir + ". Make it a relative link to a path inside the folder, or remove it."
+	}
+	climbs := func(rel, dir string) string {
+		return rel + " is a link whose path climbs above the catalog folder " + dir + ", and adaptive-pg-mcp follows only relative links that stay inside it. Make it a relative link to a path inside the folder, or remove it."
+	}
+	through := func(rel, dir string) string {
+		return rel + " is a link that leads through another link to an absolute path or above the catalog folder " + dir + ", and adaptive-pg-mcp follows only relative links that stay inside it. Make each link on the way relative and inside the folder, or remove it."
+	}
+	cases = append(cases, struct{ name, dir, want string }{"an absolute link to a file outside the folder", linked, absolute("finance/revenue.sql", linked)})
+	inner := writeTree(t, filepath.Join(dir, "inner"), map[string]string{"finance/tools.yaml": okIndex, "shared/revenue.sql": okSQL})
+	links(t, inner, map[string]string{"finance/revenue.sql": filepath.Join(inner, "shared", "revenue.sql")})
+	cases = append(cases, struct{ name, dir, want string }{"an absolute link to a file inside the folder", inner, absolute("finance/revenue.sql", inner)})
+	away := writeTree(t, filepath.Join(dir, "away"), map[string]string{"finance/tools.yaml": okIndex})
+	links(t, away, map[string]string{"finance/revenue.sql": "../../outside/revenue.sql"})
+	cases = append(cases, struct{ name, dir, want string }{"a relative link that climbs out of the folder", away, climbs("finance/revenue.sql", away)})
+	back := writeTree(t, filepath.Join(dir, "back"), map[string]string{"finance/tools.yaml": okIndex, "shared/revenue.sql": okSQL})
+	links(t, back, map[string]string{"finance/revenue.sql": "../../back/shared/revenue.sql"})
+	cases = append(cases, struct{ name, dir, want string }{"a relative link that climbs out of the folder and back in", back, climbs("finance/revenue.sql", back)})
+	chain := writeTree(t, filepath.Join(dir, "chain"), map[string]string{"finance/tools.yaml": okIndex, "store/revenue.sql": okSQL})
+	links(t, chain, map[string]string{"finance/revenue.sql": "../shared/revenue.sql", "shared/revenue.sql": filepath.Join(chain, "store", "revenue.sql")})
+	cases = append(cases, struct{ name, dir, want string }{"a relative link through an absolute link", chain, through("finance/revenue.sql", chain)})
+	folderLinked := writeTree(t, filepath.Join(dir, "folder-linked"), map[string]string{"helpdesk/tools.yaml": "version: 1\ntools: {}\n"})
+	if err := os.Symlink(outside, filepath.Join(folderLinked, "finance")); err != nil {
+		t.Fatal(err)
+	}
+	cases = append(cases, struct{ name, dir, want string }{"an absolute link to a folder outside the folder", folderLinked, absolute("finance", folderLinked)})
+	broken := writeTree(t, filepath.Join(dir, "broken"), map[string]string{"finance/tools.yaml": okIndex})
+	brokenLink := filepath.Join(broken, "finance", "revenue.sql")
+	if err := os.Symlink("gone.sql", brokenLink); err != nil {
+		t.Fatal(err)
+	}
+	_, brokenErr := filepath.EvalSymlinks(brokenLink)
+	cases = append(cases, struct{ name, dir, want string }{"a link to nothing", broken,
+		"adaptive-pg-mcp cannot read finance/revenue.sql in the catalog folder " + broken + ": " + brokenErr.Error() + ". Make it a file inside the catalog folder that the user who runs adaptive-pg-mcp can read, or remove it."})
 	if os.Getuid() != 0 {
 		locked := writeTree(t, filepath.Join(dir, "locked"), map[string]string{"finance/revenue.sql": okSQL, "finance/tools.yaml": okIndex})
 		if err := os.Chmod(filepath.Join(locked, "finance", "revenue.sql"), 0); err != nil {
@@ -295,6 +328,82 @@ func TestLoadRefusesAFolderItCannotRead(t *testing.T) {
 			_, _, err := Load(c.dir, testDatabases, testBuiltins)
 			if err == nil || err.Error() != c.want {
 				t.Errorf("the refusal:\n got %v\nwant %s", err, c.want)
+			}
+		})
+	}
+	t.Run("an absolute link inside a catalog folder named by a relative path", func(t *testing.T) {
+		t.Chdir(dir)
+		_, _, err := Load("inner", testDatabases, testBuiltins)
+		if want := absolute("finance/revenue.sql", "inner"); err == nil || err.Error() != want {
+			t.Errorf("the refusal:\n got %v\nwant %s", err, want)
+		}
+	})
+}
+
+// links makes each link of links, by its path relative to dir, point at its target, which is relative to the link's own folder.
+func links(t *testing.T, dir string, links map[string]string) {
+	t.Helper()
+	for link, target := range links {
+		path := filepath.Join(dir, filepath.FromSlash(link))
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(filepath.FromSlash(target), path); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestLoadSkipsHiddenNamesAndFollowsLinksInside(t *testing.T) {
+	const ticketsSQL = "-- name: open_tickets\nSELECT id FROM tickets WHERE status = 'open'\n"
+	const ticketsIndex = "version: 1\ntools:\n  open_tickets:\n    description: Lists the open tickets.\n    mode: read\n    databases: [helpdesk]\n    login: read\n"
+	stamp := "..2026_10_28_12_00_00.000000001"
+	cases := []struct {
+		name  string
+		files map[string]string
+		links map[string]string
+		// sources are the Source of each entry Load answers, in order.
+		sources []string
+	}{
+		{"the layout of a Kubernetes ConfigMap mount",
+			map[string]string{stamp + "/tickets.sql": ticketsSQL, stamp + "/tools.yaml": ticketsIndex},
+			map[string]string{"..data": stamp, "tickets.sql": "..data/tickets.sql", "tools.yaml": "..data/tools.yaml"},
+			[]string{"tickets.sql"}},
+		{"a linked folder inside the catalog folder, read once",
+			map[string]string{"shared/finance/revenue.sql": okSQL, "shared/finance/tools.yaml": okIndex},
+			map[string]string{"finance": "shared/finance"},
+			[]string{"finance/revenue.sql"}},
+		{"a link to a folder above it, read once",
+			map[string]string{"finance/revenue.sql": okSQL, "finance/tools.yaml": okIndex},
+			map[string]string{"finance/again": ".."},
+			[]string{"finance/revenue.sql"}},
+		{"hidden files and folders at any depth",
+			map[string]string{
+				"finance/revenue.sql": okSQL, "finance/tools.yaml": okIndex,
+				".git/hooks/revenue.sql": okSQL, "finance/.draft.sql": "SELECT 1;\n", "finance/.tools.yaml": "not: an index\n",
+				".hidden/tools.yaml": ticketsIndex,
+			},
+			nil,
+			[]string{"finance/revenue.sql"}},
+		{"links the walk does not read, even ones that lead outside or to nothing",
+			map[string]string{"finance/revenue.sql": okSQL, "finance/tools.yaml": okIndex, "notes.txt": "x\n"},
+			map[string]string{"LICENSE": "../LICENSE", "README.md": "gone.md", "finance/notes.md": "/etc/hostname", "finance/docs": "gone", "copy.txt": "notes.txt"},
+			[]string{"finance/revenue.sql"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dir := writeTree(t, t.TempDir(), c.files)
+			links(t, dir, c.links)
+			entries, reports, err := Load(dir, testDatabases, testBuiltins)
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			var sources []string
+			for _, e := range entries {
+				sources = append(sources, e.Source)
+			}
+			if !reflect.DeepEqual(sources, c.sources) || len(reports) > 0 {
+				t.Errorf("Load answered entries from %v and the reports %v, want entries from %v and no report", sources, reports, c.sources)
 			}
 		})
 	}

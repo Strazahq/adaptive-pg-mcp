@@ -179,7 +179,7 @@ func writeCatalogConfig(t *testing.T) string {
 		"server.yaml": "version: 1\nmode: straza\nlisten: stdio\nfree_sql: \"off\"\nlimits: { rows: 1000, bytes: 1048576, timeout: 30s, write_rows: 100 }\n" +
 			"gateway_tokens_sha256: [\"" + hashHex(knownToken) + "\"]\ncatalog: ./catalog\ndatabases:\n  helpdesk:\n    login: { dsn_env: HELPDESK_DSN }\n",
 		"catalog/helpdesk/tickets.sql": "-- name: open_tickets\nSELECT id FROM tickets WHERE status = 'open'\n",
-		"catalog/helpdesk/tools.yaml":  "version: 1\ntools:\n  open_tickets:\n    description: Lists the open tickets. Answers one row per ticket.\n    mode: read\n    databases: [helpdesk]\n    login: read\n",
+		"catalog/helpdesk/tools.yaml":  "version: 1\ntools:\n  open_tickets:\n    description: Lists the open tickets. Answers one row per ticket.\n    mode: read\n    databases: [helpdesk]\n    login: read\n    limits: { rows: 2000 }\n",
 	}
 	for name, text := range files {
 		path := filepath.Join(dir, filepath.FromSlash(name))
@@ -197,15 +197,16 @@ func TestCheckCommandChecksTheCatalog(t *testing.T) {
 	for _, s := range pgtest.Servers(t) {
 		t.Run(s.String(), func(t *testing.T) {
 			l := pgtest.NewLogin(t, s, password)
+			const raised = "report: helpdesk/tools.yaml entry open_tickets raises limits.rows to 2,000, above the 1,000 that server.yaml sets, so its calls may go past the cap of the built-in tools. Lower it in the entry if that is not intended.\n"
 			cases := []struct {
 				name, table string
 				code        int
 				stdout      string
 			}{
-				{"a catalog that prepares", "CREATE TABLE tickets (id int, status text)", 0, "check: no start check refuses, so adaptive-pg-mcp would start.\n"},
-				{"a statement that does not prepare", "CREATE TABLE tickets (id int)", 1,
+				{"a catalog that prepares", "CREATE TABLE tickets (id int, status text)", 0, raised + "check: no start check refuses, so adaptive-pg-mcp would start.\n"},
+				{"a statement that does not prepare", "CREATE TABLE tickets (id int)", 1, raised +
 					"refusal: helpdesk/tickets.sql statement open_tickets does not prepare on helpdesk: the server answered: column \"status\" does not exist (SQLSTATE 42703). Fix the statement or remove helpdesk from its databases.\n" +
-						"check: 1 of the findings above refuses the start, so adaptive-pg-mcp would not start. Fix what it says, and run adaptive-pg-mcp check again.\n"},
+					"check: 1 of the findings above refuses the start, so adaptive-pg-mcp would not start. Fix what it says, and run adaptive-pg-mcp check again.\n"},
 			}
 			path := writeCatalogConfig(t)
 			for _, c := range cases {
