@@ -5,7 +5,6 @@ tools/stategate.sh enforces it. Close an item by deleting its line.
 
 ## P owner actions
 
-- P-001 waiting-owner gate | The git hooks stay unbound until the owner runs make hooks in this clone, because a session never changes the hook path. | Makefile hooks | [doc 10-28]
 
 ## Q queue
 
