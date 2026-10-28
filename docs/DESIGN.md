@@ -17,6 +17,15 @@ serves Streamable HTTP and stdio. Its commands are `serve`, `check` and
 `token`. It runs standalone, or behind Straza, and the mode is set in the
 config. Postgres 14 to 18 are supported.
 
+The code lives under `internal/`, so no outside module imports it before v1
+settles. `internal/catalog` reads the organization's statements and checks
+them on their databases. `internal/core` turns catalog entries into tools and
+holds the built-in tools and the call path. They meet at `catalog.Entry`: the
+catalog fills it with what Postgres reports, such as each parameter's type
+name, and the core decides what the agent sees, such as the JSON Schema, the
+hints and the marks. The catalog never imports the go-sdk. `cmd/adaptive-pg-mcp`,
+`internal/config` and `internal/pg` arrive with M1.
+
 ## 3. Configuration
 
 `server.yaml` holds every key below. Only the two `allow_` keys have a
@@ -60,7 +69,9 @@ folder. Each index entry has `description`, `mode`, `databases`, `login`,
 `params` (in `$1` order, with name, description and optional `enum`,
 `pattern`, `minimum`, `maximum`, `maxLength`, `required`) and optional
 `limits`. A statement without an entry is not a tool, and two statements with
-one name fail the load.
+one name fail the load. An entry the core cannot turn into a tool fails the
+load too, such as one whose name is not snake_case or whose parameter has a
+Postgres type outside the supported list.
 
 ## 4. Tools
 
