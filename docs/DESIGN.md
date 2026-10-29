@@ -37,10 +37,26 @@ its requests stands alone. On stdio the caller's token comes from the
 environment variable `ADAPTIVE_PG_MCP_TOKEN`, and `serve` checks it once and
 does not start when it is missing or matches nothing.
 
+With `tls` in server.yaml, HTTP serves HTTPS only. It accepts TLS 1.2 and
+later with Go's default cipher suites and curves, offers HTTP/2 and HTTP/1.1
+by ALPN, and asks for no client certificate. A certificate and key that do
+not load, or a certificate that has expired, refuse the start. While it
+serves, the server reads both files again at a handshake once a minute has
+passed since the last read, so a tool such as cert-manager that replaces them
+in place renews the pair without a restart. A new pair serves from that
+handshake on once it loads, and the log says so. A new pair that does not
+load leaves the old one in service, and the log warns once per change of the
+files. Without `tls`, the server serves plain HTTP on an address of this
+machine only. Any other address, `0.0.0.0` and `::` included, fails the load
+unless `allow_plain_http: true` says that something in front of the server
+encrypts the traffic, such as a service mesh. The start then reports that
+the bearer tokens cross the network in cleartext.
+
 ## 3. Configuration
 
-`server.yaml` holds every key below. Only the two `allow_` keys have a
-default, false, which is the refusing side. Any other missing key fails the
+`server.yaml` holds every key below. Only `tls` and the three `allow_` keys
+may be left out. The `allow_` keys default to false, which is the refusing
+side, and without `tls` HTTP stays plain. Any other missing key fails the
 start and names the key, and a key that the file's version does not have
 fails it and names its line. A file that holds a second YAML document fails
 the load too, in server.yaml, access.yaml and tools.yaml alike, because the
@@ -52,6 +68,10 @@ that a test loads.
 version: 1                       # the format version of this file
 mode: straza                     # or standalone
 listen: 127.0.0.1:8080           # or stdio
+tls:                             # optional: serve HTTPS with this pair
+  cert_file: /etc/adaptive-pg-mcp/server.crt
+  key_file: /etc/adaptive-pg-mcp/server.key
+allow_plain_http: false          # true only when something else encrypts
 free_sql: read-write             # off, read or read-write
 limits: { rows: 1000, bytes: 1048576, timeout: 30s, write_rows: 100 }
 gateway_tokens_sha256: [ "..." ] # mode straza only: the call and listing tokens
@@ -78,9 +98,24 @@ SQL. A catalog tool may name any extra login of its database, such as
 `finance_reader`, which `logins` lists next to `read` and `write`.
 
 `access` is required in mode standalone and refused in mode straza, and
-`gateway_tokens_sha256` the other way round. Relative `access` and `catalog`
-paths resolve against the folder of `server.yaml`. Every `dsn_env` variable
-must be set and not empty, and the load names the variable, never its value.
+`gateway_tokens_sha256` the other way round. Relative `access`, `catalog`,
+`tls.cert_file` and `tls.key_file` paths resolve against the folder of
+`server.yaml`. Every `dsn_env` variable must be set and not empty, and the
+load names the variable, never its value.
+
+`tls` needs both `cert_file` and `key_file`: the PEM file of the server's
+certificate, followed by any intermediate certificates, and the PEM file of
+its private key. Without `tls`, `listen` must be localhost or a loopback
+address, such as 127.0.0.1 or [::1], unless `allow_plain_http: true` accepts
+plain HTTP beyond this machine. A host name other than localhost counts as
+beyond this machine, because the load does not resolve names. `tls` and
+`allow_plain_http: true` each fail the load with `listen: stdio`, where they
+do nothing, and they fail it together, because they contradict each other.
+`allow_plain_http: false` is always accepted. The system resolves localhost
+when `serve` binds the address, so without `tls` and `allow_plain_http:
+true`, `serve` refuses to start before the start checks when the bound
+address is not a loopback address. `check` binds no address, so it does
+not see this case.
 
 `access.yaml` is used in standalone mode only:
 
@@ -132,7 +167,8 @@ without an entry is not a tool, and the start reports it. These fail the
 load: an entry without a statement, two statements with one name anywhere in
 the catalog, an entry with the name of a built-in tool, an entry that names a
 database that server.yaml does not define or a login that its database does
-not have, and a statement that holds no SQL. The catalog reads only files
+not have, and a statement that holds no SQL or starts with a semicolon,
+which would cut it off from the EXPLAIN of section 6. The catalog reads only files
 inside its folder. It skips files and folders whose name starts with a dot,
 so a Kubernetes ConfigMap mount loads each statement once, and it reads each
 real folder once. It follows a link to a folder, a `.sql` file or a
@@ -280,15 +316,47 @@ its entry. The tool carries
   cannot be read. A call would then touch a database other than the one it
   names.
 - A catalog statement does not prepare on one of its databases, its
-  parameter count differs from its index, or a parameter's type differs
-  between two of its databases.
+  parameter count differs from its index, its plan on one of its databases
+  needs a grant that its entry's login lacks or fails for a reason that a
+  NULL parameter cannot cause, or a parameter's type differs between two of
+  its databases.
 
-The catalog check prepares each statement with Parse and Describe only, on
-each of its databases and on its entry's login, in a read-only transaction,
-so no statement runs. A catalog that cannot be read or does not load also
+The catalog check prepares each statement with Parse and Describe, on each
+of its databases and on its entry's login, in a read-only transaction. In
+the same transaction it then plans the statement with `EXPLAIN (ANALYZE
+false)` and NULL for each parameter, and Postgres checks the grants of the
+plan: SELECT on each table or column it reads, EXECUTE on each function it
+calls, and INSERT, UPDATE or DELETE on the table it writes. EXPLAIN without
+ANALYZE does not run the statement, so it changes no row and fires no
+trigger, also for a write. While it plans, Postgres may evaluate a STABLE or
+IMMUTABLE function whose arguments are all constants, a NULL parameter
+included, on the entry's login and in the read-only transaction. Such a
+function can leave an effect on the session, such as an advisory lock, so
+the check closes the connection afterwards, and the effect ends with it.
+The check also rolls its transaction back, so an effect that a commit would
+deliver, such as a notification, never leaves it.
+
+Some missing grants show on the first call instead. Postgres checks a few
+grants only while a statement runs, such as USAGE on a sequence that a
+column default calls nextval on. The plan also leaves out a part whose
+result a NULL parameter decides, such as a STRICT function of a parameter,
+and with it the grants of that part. A statement that EXPLAIN cannot plan,
+such as CALL, is reported, not refused, and its tool is served. So is a
+statement whose plan fails with an error that a NULL parameter can cause: a
+data exception, an integrity constraint violation, a PL/pgSQL error such as
+a function that raises on NULL, or an exception of a SQL or external
+routine, which are the SQLSTATE classes 22, 23, P0, 2F, 38 and 39. Any other
+failure of the plan refuses the start, under invariant 8, because the check
+did not run: a statement timeout, such as a plan that waits for a lock or
+for a slow function, a dropped connection, a terminated backend, or the
+check's own deadline of 30 seconds.
+
+A catalog that cannot be read or does not load also
 refuses the start. A login that cannot
 connect, or whose connection string does not parse, also refuses the start,
-under invariant 8, because a check that cannot run never happened.
+under invariant 8, because a check that cannot run never happened. So does
+a `tls` certificate and key that do not load, or a certificate that has
+expired, because the server could not serve HTTPS with them.
 
 Everything else is reported, not refused. `check` and the start log say what
 each login can do, such as that it can write to every table or has BYPASSRLS,
@@ -362,6 +430,30 @@ word for word:
   type int4 on sales_eu and of type int8 on sales_us, and a tool argument
   takes one type. Make the types match, or cast the parameter in the
   statement, such as $1::int4.`
+- `helpdesk/tickets.sql statement close_tickets needs a grant that the write
+  login of helpdesk lacks: the server answered: permission denied for table
+  tickets (SQLSTATE 42501). Grant the login what the statement needs, or
+  remove helpdesk from its databases.`
+- A report line, not a refusal: `helpdesk/tickets.sql statement close_month
+  is a statement that EXPLAIN cannot plan, so the start checks cannot check
+  its grants. The tool is served, and a grant that the write login of
+  helpdesk lacks shows on its first call. Make sure the login holds what the
+  statement needs.`
+- A report line, not a refusal: `helpdesk/tickets.sql statement
+  tickets_after does not plan on helpdesk with NULL for each parameter: the
+  server answered: the id must be set (SQLSTATE P0001). The tool is served,
+  and a grant that the read login of helpdesk lacks shows on its first call.
+  Fix the statement if its calls fail the same way.`
+- `helpdesk/tickets.sql statement ticket_count could not be planned on
+  helpdesk: the server answered: terminating connection due to administrator
+  command (SQLSTATE 57P01). Without the plan the start checks cannot check
+  the grants of the read login of helpdesk, so adaptive-pg-mcp will not
+  start. Fix what the reason names, such as a lock or a slow function that
+  holds up the plan or a server that drops the connection, and start again.`
+- `finance/revenue.sql statement revenue_by_region on line 1 starts with a
+  semicolon, which would cut the statement off from the EXPLAIN that the
+  start checks put before it to check its grants. Remove the semicolon at the
+  start of the statement.`
 - `close_tickets on helpdesk would change 50 rows and the cap is 10, so
   nothing was changed. Narrow the call through its arguments, or ask an
   administrator to raise limits.write_rows of close_tickets in the catalog.`
@@ -400,6 +492,77 @@ word for word:
 - `the cursor of list_databases does not decode to a page of this listing,
   so the call is refused. Pass the nextCursor of the previous page exactly as
   it came, or leave cursor out to start from the first page.`
+- `/etc/adaptive-pg-mcp/server.yaml does not set listen, and only tls,
+  allow_plain_http, allow_cross_database and allow_superuser may be left out.
+  Add listen: stdio, or an address such as 127.0.0.1:8080.`
+- `/etc/adaptive-pg-mcp/server.yaml has listen 0.0.0.0:8080, which is not
+  localhost or a loopback address, so without tls the bearer tokens of its
+  callers would cross the network in cleartext. Add tls with cert_file and
+  key_file, set listen to a loopback address such as 127.0.0.1:8080, or set
+  allow_plain_http: true if something in front of the server encrypts the
+  traffic, such as a service mesh.`
+- `listen localhost:8080 resolved to 192.0.2.10:8080, which is not a loopback
+  address, so without tls the bearer tokens of its callers could cross the
+  network in cleartext, and adaptive-pg-mcp will not start. Make localhost
+  resolve to 127.0.0.1, set listen to a loopback address such as
+  127.0.0.1:8080, or add tls with cert_file and key_file.`
+- `/etc/adaptive-pg-mcp/server.yaml sets tls with listen stdio, where no
+  network connection carries the calls. Remove tls, or set listen to the
+  address to serve HTTPS on.`
+- `/etc/adaptive-pg-mcp/server.yaml sets allow_plain_http: true with listen
+  stdio, where no HTTP is served. Remove allow_plain_http, or set listen to
+  the address to serve HTTP on.`
+- `/etc/adaptive-pg-mcp/server.yaml sets both tls and allow_plain_http: true,
+  which contradict each other, because with tls adaptive-pg-mcp serves HTTPS
+  only. Remove allow_plain_http to serve HTTPS, or remove tls to serve plain
+  HTTP.`
+- `/etc/adaptive-pg-mcp/server.yaml sets tls without cert_file, and tls needs
+  both cert_file and key_file. Add tls.cert_file: the path to the PEM file of
+  the server's certificate.`
+- `/etc/adaptive-pg-mcp/server.yaml sets tls without key_file, and tls needs
+  both cert_file and key_file. Add tls.key_file: the path to the PEM file of
+  the certificate's private key.`
+- A report line, not a refusal: `listen 0.0.0.0:8080 serves plain HTTP beyond
+  this machine, which allow_plain_http: true accepts. The bearer tokens of
+  the callers cross the network in cleartext unless something in front of the
+  server encrypts the traffic, such as a service mesh. Set tls with cert_file
+  and key_file to serve HTTPS instead.`
+- `the certificate file /etc/adaptive-pg-mcp/server.crt, which tls.cert_file
+  names, cannot be read: permission denied, so adaptive-pg-mcp will not
+  start. Check that the file exists and that the user adaptive-pg-mcp runs as
+  may read it.`
+- `the key file /etc/adaptive-pg-mcp/server.key, which tls.key_file names,
+  cannot be read: no such file or directory, so adaptive-pg-mcp will not
+  start. Check that the file exists and that the user adaptive-pg-mcp runs as
+  may read it.`
+- `the certificate file /etc/adaptive-pg-mcp/server.crt holds no certificate
+  in PEM form, so adaptive-pg-mcp will not start. Put the server's
+  certificate in it in PEM form, followed by any intermediate certificates.`
+- `the key file /etc/adaptive-pg-mcp/server.key holds no private key in PEM
+  form, so adaptive-pg-mcp will not start. Put the private key of the
+  certificate in it, in PEM form.`
+- `the first certificate in /etc/adaptive-pg-mcp/server.crt does not parse as
+  an X.509 certificate, so adaptive-pg-mcp will not start. Replace it with
+  the server's certificate as its issuer gave it.`
+- `the private key in /etc/adaptive-pg-mcp/server.key does not parse as an
+  RSA, ECDSA or Ed25519 key, so adaptive-pg-mcp will not start. Replace it
+  with the private key of the certificate in
+  /etc/adaptive-pg-mcp/server.crt, in PEM form.`
+- `the private key in /etc/adaptive-pg-mcp/server.key does not belong to the
+  certificate in /etc/adaptive-pg-mcp/server.crt, so adaptive-pg-mcp will not
+  start. Put a certificate and its own private key in the two files.`
+- `the certificate in /etc/adaptive-pg-mcp/server.crt expired at
+  2026-10-01T12:00:00Z, so adaptive-pg-mcp will not start. Renew it, and put
+  the new certificate and its private key in /etc/adaptive-pg-mcp/server.crt
+  and /etc/adaptive-pg-mcp/server.key.`
+- A warning while it serves, not a refusal, when a renewed pair does not
+  load: `the private key in /etc/adaptive-pg-mcp/server.key does not belong
+  to the certificate in /etc/adaptive-pg-mcp/server.crt, so adaptive-pg-mcp
+  keeps serving the certificate it loaded before. Put a certificate and its
+  own private key in the two files.` Each certificate and key refusal above
+  reads the same way as such a warning, with `so adaptive-pg-mcp keeps
+  serving the certificate it loaded before` in place of `so adaptive-pg-mcp
+  will not start`.
 
 ## 8. Behind Straza
 

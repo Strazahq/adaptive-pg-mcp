@@ -52,7 +52,7 @@ The gates cite these numbers.
    compared in constant time. Tokens come from crypto/rand. A caller's token
    never goes anywhere else.
 6. The server never starts a program, and it reads only its config, its
-   access file and its catalog.
+   access file, its catalog, and its TLS certificate and key.
 7. Every connection verifies its peer as its config asks, and code never
    switches a check off.
 8. Fail closed. An unreadable config, catalog or check refuses to start, an

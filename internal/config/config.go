@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -51,6 +52,10 @@ type Config struct {
 	Mode Mode
 	// Listen is stdio, or the host and port that Streamable HTTP listens on.
 	Listen string
+	// TLS is the certificate and key that Streamable HTTP serves HTTPS with, or nil for plain HTTP.
+	TLS *TLS
+	// AllowPlainHTTP accepts plain HTTP on a listen address beyond this machine.
+	AllowPlainHTTP bool
 	// FreeSQL says which free SQL tools the server offers.
 	FreeSQL FreeSQL
 	// Limits are the caps of every call.
@@ -63,6 +68,14 @@ type Config struct {
 	Databases map[string]Database
 	// Callers are the callers of access.yaml, in mode standalone only.
 	Callers []Caller
+}
+
+// TLS is the tls key: the files of the certificate and key that HTTPS serves.
+type TLS struct {
+	// CertFile is the PEM file of the server's certificate and any intermediate certificates, resolved against the folder of server.yaml.
+	CertFile string
+	// KeyFile is the PEM file of the certificate's private key, resolved against the folder of server.yaml.
+	KeyFile string
 }
 
 // Limits are the caps of every call.
@@ -117,12 +130,20 @@ type rawServer struct {
 	Version             *int                    `yaml:"version"`
 	Mode                *string                 `yaml:"mode"`
 	Listen              *string                 `yaml:"listen"`
+	TLS                 *rawTLS                 `yaml:"tls"`
+	AllowPlainHTTP      *bool                   `yaml:"allow_plain_http"`
 	FreeSQL             *string                 `yaml:"free_sql"`
 	Limits              *rawLimits              `yaml:"limits"`
 	GatewayTokensSHA256 []string                `yaml:"gateway_tokens_sha256"`
 	Catalog             *string                 `yaml:"catalog"`
 	Access              *string                 `yaml:"access"`
 	Databases           map[string]*rawDatabase `yaml:"databases"`
+}
+
+// rawTLS is the tls key as written.
+type rawTLS struct {
+	CertFile *string `yaml:"cert_file"`
+	KeyFile  *string `yaml:"key_file"`
 }
 
 // rawLimits is the limits key as written.
@@ -153,7 +174,7 @@ var hashRule = regexp.MustCompile(`^[0-9a-f]{64}$`)
 var envRule = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 // required is the reason every missing-key refusal gives.
-const required = "and only allow_cross_database and allow_superuser have a default"
+const required = "and only tls, allow_plain_http, allow_cross_database and allow_superuser may be left out"
 
 // Load reads server.yaml at path, and in mode standalone the access.yaml it
 // names, and checks every key. It reads each dsn_env variable with getenv.
@@ -207,6 +228,9 @@ func check(path string, raw *rawServer) (*Config, string, error) {
 		return nil, "", fmt.Errorf("%s has listen %s, which is neither stdio nor a host and port. Set listen to stdio, or to an address such as 127.0.0.1:8080.", path, *raw.Listen)
 	}
 	cfg.Listen = *raw.Listen
+	if err := checkTransport(path, raw, cfg); err != nil {
+		return nil, "", err
+	}
 
 	switch {
 	case unset(raw.FreeSQL):
@@ -310,6 +334,47 @@ func checkMode(path string, raw *rawServer, cfg *Config) (string, error) {
 		cfg.GatewayTokens = append(cfg.GatewayTokens, hash)
 	}
 	return "", nil
+}
+
+// checkTransport applies tls, which serves HTTPS, and allow_plain_http,
+// which accepts plain HTTP on an address beyond this machine. It refuses
+// either key where it does nothing or where they contradict, and plain HTTP
+// beyond this machine that allow_plain_http: true does not accept, because
+// the bearer tokens would cross the network in cleartext.
+func checkTransport(path string, raw *rawServer, cfg *Config) error {
+	plain := raw.AllowPlainHTTP != nil && *raw.AllowPlainHTTP
+	switch {
+	case cfg.Listen == Stdio && raw.TLS != nil:
+		return fmt.Errorf("%s sets tls with listen stdio, where no network connection carries the calls. Remove tls, or set listen to the address to serve HTTPS on.", path)
+	case cfg.Listen == Stdio && plain:
+		return fmt.Errorf("%s sets allow_plain_http: true with listen stdio, where no HTTP is served. Remove allow_plain_http, or set listen to the address to serve HTTP on.", path)
+	case raw.TLS != nil && plain:
+		return fmt.Errorf("%s sets both tls and allow_plain_http: true, which contradict each other, because with tls adaptive-pg-mcp serves HTTPS only. Remove allow_plain_http to serve HTTPS, or remove tls to serve plain HTTP.", path)
+	case raw.TLS != nil && unset(raw.TLS.CertFile):
+		return fmt.Errorf("%s sets tls without cert_file, and tls needs both cert_file and key_file. Add tls.cert_file: the path to the PEM file of the server's certificate.", path)
+	case raw.TLS != nil && unset(raw.TLS.KeyFile):
+		return fmt.Errorf("%s sets tls without key_file, and tls needs both cert_file and key_file. Add tls.key_file: the path to the PEM file of the certificate's private key.", path)
+	case raw.TLS != nil:
+		cfg.TLS = &TLS{CertFile: besides(path, *raw.TLS.CertFile), KeyFile: besides(path, *raw.TLS.KeyFile)}
+	case cfg.Listen != Stdio && !plain && !OnThisMachine(cfg.Listen):
+		_, port, _ := net.SplitHostPort(cfg.Listen)
+		return fmt.Errorf("%s has listen %s, which is not localhost or a loopback address, so without tls the bearer tokens of its callers would cross the network in cleartext. Add tls with cert_file and key_file, set listen to a loopback address such as %s, or set allow_plain_http: true if something in front of the server encrypts the traffic, such as a service mesh.", path, cfg.Listen, net.JoinHostPort("127.0.0.1", port))
+	}
+	cfg.AllowPlainHTTP = plain
+	return nil
+}
+
+// OnThisMachine reports whether the listen address listen serves this
+// machine only: its host is localhost or a loopback IP address, such as
+// 127.0.0.1 or ::1. Any other host name counts as beyond this machine,
+// because the load does not resolve names.
+func OnThisMachine(listen string) bool {
+	host, _, err := net.SplitHostPort(listen)
+	if err != nil {
+		return false
+	}
+	ip := net.ParseIP(host)
+	return strings.EqualFold(host, "localhost") || (ip != nil && ip.IsLoopback())
 }
 
 // checkDatabase checks one database and its login or logins.

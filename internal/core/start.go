@@ -111,11 +111,11 @@ type loginResult struct {
 // they found, the logins in the order of the config and then the catalog,
 // and keeps the pools open for serving until Close. A login that cannot
 // connect refuses the start, because a check that cannot run is a check that
-// never happened.
+// never happened. The TLS check runs before all of them, and its findings come first.
 func (s *Server) Check(ctx context.Context) []Finding {
 	s.Close()
 	s.pools = pg.NewPools()
-	var findings []Finding
+	findings := s.checkTLS()
 	ready := map[pg.Login]bool{}
 	for _, name := range slices.Sorted(maps.Keys(s.cfg.Databases)) {
 		fs, results := s.checkDatabase(ctx, name, s.cfg.Databases[name])

@@ -194,3 +194,66 @@ func TestLoadReadsUnquotedYAMLWords(t *testing.T) {
 		t.Errorf("free_sql: off reads as %q, want off", cfg.FreeSQL)
 	}
 }
+
+func TestLoadAcceptsTheTransports(t *testing.T) {
+	pair := map[string]any{"cert_file": "tls/server.crt", "key_file": "/etc/adaptive-pg-mcp/server.key"}
+	cases := []struct {
+		name   string
+		change func(s map[string]any)
+		tls    bool
+		plain  bool
+	}{
+		{"plain HTTP on 127.0.0.1", func(map[string]any) {}, false, false},
+		{"plain HTTP on another loopback address", func(s map[string]any) { set(s, "listen", "127.0.0.2:8080") }, false, false},
+		{"plain HTTP on ::1", func(s map[string]any) { set(s, "listen", "[::1]:8080") }, false, false},
+		{"plain HTTP on localhost", func(s map[string]any) { set(s, "listen", "localhost:8080") }, false, false},
+		{"plain HTTP beyond this machine with allow_plain_http", func(s map[string]any) { set(s, "listen", "0.0.0.0:8080"); set(s, "allow_plain_http", true) }, false, true},
+		{"plain HTTP on loopback with allow_plain_http", func(s map[string]any) { set(s, "allow_plain_http", true) }, false, true},
+		{"HTTPS beyond this machine", func(s map[string]any) { set(s, "listen", "0.0.0.0:8443"); set(s, "tls", pair) }, true, false},
+		{"HTTPS with allow_plain_http false", func(s map[string]any) { set(s, "tls", pair); set(s, "allow_plain_http", false) }, true, false},
+		{"stdio with allow_plain_http false", func(s map[string]any) { set(s, "listen", "stdio"); set(s, "allow_plain_http", false) }, false, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			s := serverDoc()
+			c.change(s)
+			cfg, dir, err := load(t, marshal(t, s, accessDoc(), environment()))
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if cfg.AllowPlainHTTP != c.plain {
+				t.Errorf("allow_plain_http reads as %v, want %v", cfg.AllowPlainHTTP, c.plain)
+			}
+			switch {
+			case !c.tls && cfg.TLS != nil:
+				t.Errorf("tls reads as %+v, want none", cfg.TLS)
+			case c.tls && (cfg.TLS == nil || *cfg.TLS != TLS{CertFile: filepath.Join(dir, "tls", "server.crt"), KeyFile: "/etc/adaptive-pg-mcp/server.key"}):
+				t.Errorf("tls reads as %+v, want cert_file beside server.yaml in %s and key_file as written", cfg.TLS, dir)
+			}
+		})
+	}
+}
+
+func TestOnThisMachine(t *testing.T) {
+	cases := []struct {
+		listen string
+		local  bool
+	}{
+		{"127.0.0.1:8080", true},
+		{"127.10.0.1:8080", true},
+		{"[::1]:8080", true},
+		{"[::ffff:127.0.0.1]:8080", true},
+		{"localhost:8080", true},
+		{"LocalHost:8080", true},
+		{"0.0.0.0:8080", false},
+		{"[::]:8080", false},
+		{"192.0.2.10:8080", false},
+		{"localhost.example.internal:8080", false},
+		{"stdio", false},
+	}
+	for _, c := range cases {
+		if got := OnThisMachine(c.listen); got != c.local {
+			t.Errorf("OnThisMachine(%s) is %v, want %v", c.listen, got, c.local)
+		}
+	}
+}

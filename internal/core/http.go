@@ -61,6 +61,22 @@ func (s *Server) Handler() http.Handler {
 	return s.refuseOrigin(s.authenticate(mux))
 }
 
+// refuseOffLoopback refuses plain HTTP on a listener that is not on a
+// loopback address, unless allow_plain_http: true accepts it. The load
+// accepts localhost by name, and the system resolves that name when the
+// listener binds, so only the bound address shows where plain HTTP would serve.
+func (s *Server) refuseOffLoopback(ln net.Listener) error {
+	if s.cfg.TLS != nil || s.cfg.AllowPlainHTTP {
+		return nil
+	}
+	host, _, err := net.SplitHostPort(ln.Addr().String())
+	if ip := net.ParseIP(host); err == nil && ip != nil && ip.IsLoopback() {
+		return nil
+	}
+	_, port, _ := net.SplitHostPort(s.cfg.Listen)
+	return fmt.Errorf("listen %s resolved to %s, which is not a loopback address, so without tls the bearer tokens of its callers could cross the network in cleartext, and adaptive-pg-mcp will not start. Make localhost resolve to 127.0.0.1, set listen to a loopback address such as %s, or add tls with cert_file and key_file.", s.cfg.Listen, ln.Addr(), net.JoinHostPort("127.0.0.1", port))
+}
+
 // server returns the one MCP server for every HTTP request.
 func (s *Server) server(*http.Request) *mcp.Server { return s.mcp }
 
@@ -79,9 +95,16 @@ func (s *Server) refuseOrigin(next http.Handler) http.Handler {
 }
 
 // Serve runs the start checks, and then serves Streamable HTTP on ln until
-// ctx ends and stops within shutdownGrace. When a start check refuses, it
-// closes ln without serving and returns a sentence.
+// ctx ends and stops within shutdownGrace. With tls in server.yaml it serves
+// HTTPS only, and reads the certificate and key again at most once per
+// certReload. When ln is not on a loopback address and plain HTTP would
+// serve there, or when a start check refuses, it closes ln without serving
+// and returns a sentence.
 func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
+	if err := s.refuseOffLoopback(ln); err != nil {
+		_ = ln.Close()
+		return err
+	}
 	if err := s.start(ctx); err != nil {
 		_ = ln.Close()
 		return err
@@ -93,9 +116,25 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 		IdleTimeout:       idleTimeout,
 		ErrorLog:          slog.NewLogLogger(s.log.Handler(), slog.LevelWarn),
 	}
+	scheme := "http://"
+	if s.cfg.TLS != nil {
+		pair, fault := newKeyPair(*s.cfg.TLS, s.log, time.Now())
+		if fault != nil {
+			_ = ln.Close()
+			return errors.New(fault.refusal())
+		}
+		hs.TLSConfig = pair.tlsConfig()
+		scheme = "https://"
+	}
 	done := make(chan error, 1)
-	go func() { done <- hs.Serve(ln) }()
-	s.log.Info("serving Streamable HTTP", "address", "http://"+ln.Addr().String()+endpointPath, "mode", string(s.cfg.Mode))
+	go func() {
+		if hs.TLSConfig != nil {
+			done <- hs.ServeTLS(ln, "", "")
+			return
+		}
+		done <- hs.Serve(ln)
+	}()
+	s.log.Info("serving Streamable HTTP", "address", scheme+ln.Addr().String()+endpointPath, "mode", string(s.cfg.Mode))
 	select {
 	case err := <-done:
 		return fmt.Errorf("adaptive-pg-mcp stopped serving HTTP on %s: %v. Check that the address is still the machine's, and start it again.", ln.Addr(), err)

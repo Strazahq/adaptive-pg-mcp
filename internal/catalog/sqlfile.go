@@ -27,7 +27,8 @@ type statement struct {
 // statements. Each starts at a line that reads -- name: and the tool name,
 // with white space around it allowed, and runs to the next such line or to
 // the end of the file. Text before the first name line may hold only
-// comments and white space, and every statement must hold SQL. A byte order
+// comments and white space, and every statement must hold SQL that does not
+// start with a semicolon. A byte order
 // mark that an editor wrote at the start of the file is not part of the text.
 func splitStatements(file, text string) ([]*statement, error) {
 	text = strings.TrimPrefix(text, "\ufeff")
@@ -39,8 +40,12 @@ func splitStatements(file, text string) ([]*statement, error) {
 			return nil
 		}
 		cur.sql = strings.TrimSpace(strings.Join(body, "\n"))
-		if firstSQL(cur.sql) < 0 {
+		at := firstSQL(cur.sql)
+		if at < 0 {
 			return errors.New(file + " statement " + cur.name + " on line " + strconv.Itoa(cur.line) + " holds no SQL, only comments or blank lines. Write the statement below its -- name: line, or remove the line.")
+		}
+		if cur.sql[at] == ';' {
+			return errors.New(file + " statement " + cur.name + " on line " + strconv.Itoa(cur.line) + " starts with a semicolon, which would cut the statement off from the EXPLAIN that the start checks put before it to check its grants. Remove the semicolon at the start of the statement.")
 		}
 		out = append(out, cur)
 		body = nil
@@ -88,7 +93,8 @@ func preambleSQL(file string, lines []string) error {
 
 // firstSQL returns the byte offset of the first character of text that is
 // neither white space nor part of a comment, or -1 when text holds only
-// comments and white space. A -- comment runs to the end of its line, and a
+// comments and white space. A -- comment runs to the next line feed or
+// carriage return, as Postgres ends it, and a
 // /* comment runs to its matching */, nested as Postgres nests them. A /*
 // comment that never closes counts as SQL, because Postgres refuses it.
 func firstSQL(text string) int {
@@ -97,7 +103,7 @@ func firstSQL(text string) int {
 		case strings.ContainsRune(" \t\n\r\f\v", rune(text[i])):
 			i++
 		case strings.HasPrefix(text[i:], "--"):
-			nl := strings.IndexByte(text[i:], '\n')
+			nl := strings.IndexAny(text[i:], "\n\r")
 			if nl < 0 {
 				return -1
 			}

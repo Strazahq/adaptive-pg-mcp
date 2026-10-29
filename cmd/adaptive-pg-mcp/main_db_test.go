@@ -5,6 +5,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"io"
 	"net/http"
 	"os"
@@ -163,6 +165,80 @@ func TestSecretsStayOutOfLogsAndErrorsOnAHarnessDatabase(t *testing.T) {
 			} {
 				if !strings.Contains(seen.String(), must) {
 					t.Errorf("the capture misses %q, which it should hold:\n%s", must, seen.String())
+				}
+			}
+		})
+	}
+}
+
+// tlsBearer adds the known token to every request of the SDK client and sends it on base.
+type tlsBearer struct{ base http.RoundTripper }
+
+// RoundTrip sends r with the known token in its Authorization header.
+func (b tlsBearer) RoundTrip(r *http.Request) (*http.Response, error) {
+	r = r.Clone(r.Context())
+	r.Header.Set("Authorization", "Bearer "+knownToken)
+	return b.base.RoundTrip(r)
+}
+
+func TestServeOverHTTPS(t *testing.T) {
+	for _, s := range pgtest.Servers(t) {
+		t.Run(s.String(), func(t *testing.T) {
+			l := pgtest.NewLogin(t, s, password)
+			env := harness(t, l, pgtest.NewDatabase(t, s))
+			path := writeConfig(t, "127.0.0.1:0", "tls: { cert_file: server.crt, key_file: server.key }\n")
+			roots := x509.NewCertPool()
+			roots.AddCert(writePair(t, filepath.Dir(path), "server", time.Now().Add(24*time.Hour)))
+			base := &http.Transport{TLSClientConfig: &tls.Config{RootCAs: roots}, ForceAttemptHTTP2: true}
+			defer base.CloseIdleConnections()
+
+			logs := newSyncBuffer()
+			ctx, cancel := context.WithCancel(context.Background())
+			exited := make(chan int, 1)
+			go func() { exited <- run(ctx, []string{"serve", "-config", path}, io.Discard, logs, lookup(env)) }()
+			url := waitForAddress(t, logs)
+			var seen strings.Builder
+			if !strings.HasPrefix(url, "https://") {
+				t.Errorf("serve logged the address %s, want https://", url)
+			}
+
+			req, _ := http.NewRequest(http.MethodPost, url, strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"t","version":"1"}}}`))
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Accept", "application/json, text/event-stream")
+			res, err := (&http.Client{Transport: base, Timeout: 5 * time.Second}).Do(req)
+			if err != nil {
+				t.Fatalf("POST without a token over HTTPS: %v", err)
+			}
+			body, _ := io.ReadAll(res.Body)
+			res.Body.Close()
+			if res.StatusCode != http.StatusUnauthorized || res.Proto != "HTTP/2.0" {
+				t.Errorf("a request without a token answered %d over %s, want 401 over HTTP/2.0: %s", res.StatusCode, res.Proto, body)
+			}
+			seen.Write(body)
+
+			call, stop := context.WithTimeout(context.Background(), 10*time.Second)
+			defer stop()
+			tr := &mcp.StreamableClientTransport{Endpoint: url, HTTPClient: &http.Client{Transport: tlsBearer{base}}, MaxRetries: -1}
+			cs, err := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "1"}, nil).Connect(call, tr, nil)
+			if err != nil {
+				t.Fatalf("connect over HTTPS: %v", err)
+			}
+			list, err := cs.CallTool(call, &mcp.CallToolParams{Name: "list_databases", Arguments: map[string]any{}})
+			cs.Close()
+			if err != nil {
+				t.Fatalf("list_databases over HTTPS: %v", err)
+			}
+			if text := list.Content[0].(*mcp.TextContent).Text; list.IsError || text != "list_databases found 1 database: helpdesk." {
+				t.Errorf("list_databases over HTTPS answered %q, want the one database of support_bot", text)
+			}
+			cancel()
+			if code := <-exited; code != 0 {
+				t.Errorf("serve exited %d after its context ended, want 0", code)
+			}
+			seen.WriteString(logs.String())
+			for _, secret := range append([]string{password, knownToken}, keyLines(t, filepath.Join(filepath.Dir(path), "server.key"))...) {
+				if strings.Contains(seen.String(), secret) {
+					t.Errorf("a log line or an answer shows %q:\n%s", secret, seen.String())
 				}
 			}
 		})

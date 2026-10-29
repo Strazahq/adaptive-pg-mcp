@@ -3,11 +3,19 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/sha256"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"io"
+	"math/big"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -87,6 +95,60 @@ callers:
 		}
 	}
 	return filepath.Join(dir, "server.yaml")
+}
+
+// writePair writes a new self-signed certificate for 127.0.0.1, valid until
+// notAfter, and its private key into dir as name.crt and name.key, and
+// returns the certificate. The key exists only in the test's own folder.
+func writePair(t *testing.T, dir, name string, notAfter time.Time) *x509.Certificate {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	template := &x509.Certificate{
+		SerialNumber: big.NewInt(time.Now().UnixNano()),
+		Subject:      pkix.Name{CommonName: name},
+		NotBefore:    notAfter.Add(-30 * 24 * time.Hour),
+		NotAfter:     notAfter,
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		IPAddresses:  []net.IP{net.IPv4(127, 0, 0, 1)},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyDER, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for file, block := range map[string]*pem.Block{name + ".crt": {Type: "CERTIFICATE", Bytes: der}, name + ".key": {Type: "PRIVATE KEY", Bytes: keyDER}} {
+		if err := os.WriteFile(filepath.Join(dir, file), pem.EncodeToMemory(block), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	leaf, err := x509.ParseCertificate(der)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return leaf
+}
+
+// keyLines returns the lines of the PEM file at path that carry key material, the base64 between its markers.
+func keyLines(t *testing.T, path string) []string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var lines []string
+	for _, l := range strings.Split(string(data), "\n") {
+		if l != "" && !strings.HasPrefix(l, "-----") {
+			lines = append(lines, l)
+		}
+	}
+	return lines
 }
 
 // environ holds a connection string for every login, the first with the known password.
@@ -187,13 +249,66 @@ func TestSecretsStayOutOfLogsAndErrors(t *testing.T) {
 		keep(errs.String() + out.String())
 	}
 
-	for _, secret := range []string{password, knownToken} {
+	// Check and serve with a TLS pair, and check with the key of another certificate, while no database can be reached.
+	withTLS := writeConfig(t, "127.0.0.1:0", "tls: { cert_file: server.crt, key_file: server.key }\n")
+	dir := filepath.Dir(withTLS)
+	writePair(t, dir, "server", time.Now().Add(24*time.Hour))
+	writePair(t, dir, "other", time.Now().Add(24*time.Hour))
+	text, err := os.ReadFile(withTLS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mismatched := filepath.Join(dir, "mismatched.yaml")
+	if err := os.WriteFile(mismatched, bytes.Replace(text, []byte("key_file: server.key"), []byte("key_file: other.key"), 1), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"check", "-config", withTLS}, {"serve", "-config", withTLS}, {"check", "-config", mismatched}} {
+		var out, errs bytes.Buffer
+		if code := run(context.Background(), args, &out, &errs, lookup(environ(knownToken))); code != 1 {
+			t.Errorf("%s exited %d while no database can be reached, want 1", args[0], code)
+		}
+		keep(errs.String() + out.String())
+	}
+
+	secrets := append([]string{password, knownToken}, keyLines(t, filepath.Join(dir, "server.key"))...)
+	for _, secret := range append(secrets, keyLines(t, filepath.Join(dir, "other.key"))...) {
 		if strings.Contains(seen.String(), secret) {
 			t.Errorf("a log line, an error or an answer shows %q:\n%s", secret, seen.String())
 		}
 	}
 	if !strings.Contains(seen.String(), "FINANCE_DSN") || !strings.Contains(seen.String(), "the login of sales_eu cannot connect, because the host name of the connection string does not resolve") {
 		t.Errorf("the capture misses the failures it should hold:\n%s", seen.String())
+	}
+	if !strings.Contains(seen.String(), "refusal: the private key in "+filepath.Join(dir, "other.key")+" does not belong to the certificate in "+filepath.Join(dir, "server.crt")) {
+		t.Errorf("the capture misses the refusal of the mismatched key:\n%s", seen.String())
+	}
+}
+
+func TestCheckPrintsTheTLSFindingsFirst(t *testing.T) {
+	cases := []struct {
+		name, listen, extra string
+		want                func(dir string, leaf *x509.Certificate) string
+	}{
+		{"plain HTTP beyond this machine", "0.0.0.0:8080", "allow_plain_http: true\n", func(string, *x509.Certificate) string {
+			return "report: listen 0.0.0.0:8080 serves plain HTTP beyond this machine, which allow_plain_http: true accepts. The bearer tokens of the callers cross the network in cleartext unless something in front of the server encrypts the traffic, such as a service mesh. Set tls with cert_file and key_file to serve HTTPS instead."
+		}},
+		{"an expired certificate", "0.0.0.0:8443", "tls: { cert_file: server.crt, key_file: server.key }\n", func(dir string, leaf *x509.Certificate) string {
+			crt, key := filepath.Join(dir, "server.crt"), filepath.Join(dir, "server.key")
+			return "refusal: the certificate in " + crt + " expired at " + leaf.NotAfter.UTC().Format(time.RFC3339) + ", so adaptive-pg-mcp will not start. Renew it, and put the new certificate and its private key in " + crt + " and " + key + "."
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			path := writeConfig(t, c.listen, c.extra)
+			leaf := writePair(t, filepath.Dir(path), "server", time.Now().Add(-time.Hour))
+			var out, errs bytes.Buffer
+			code := run(context.Background(), []string{"check", "-config", path}, &out, &errs, lookup(environ(knownToken)))
+			// No database of the test config can be reached, so the logins refuse the start after the TLS finding.
+			first, _, _ := strings.Cut(out.String(), "\n")
+			if want := c.want(filepath.Dir(path), leaf); code != 1 || first != want {
+				t.Errorf("check exited %d and printed first:\n%s\nwant 1 and:\n%s", code, first, want)
+			}
+		})
 	}
 }
 
@@ -319,7 +434,7 @@ func dataTools(t *testing.T, url string) string {
 // waitForAddress waits for serve to log its address and returns the endpoint URL.
 func waitForAddress(t *testing.T, logs *syncBuffer) string {
 	t.Helper()
-	re := regexp.MustCompile(`address=(http://127\.0\.0\.1:\d+/mcp)`)
+	re := regexp.MustCompile(`address=(https?://127\.0\.0\.1:\d+/mcp)`)
 	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
 		if m := re.FindStringSubmatch(logs.String()); m != nil {
 			return m[1]

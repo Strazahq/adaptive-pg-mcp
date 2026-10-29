@@ -34,7 +34,7 @@ func runRefusals(t *testing.T, cases []refusal) {
 }
 
 func TestLoadNamesEveryMissingKey(t *testing.T) {
-	const why = "and only allow_cross_database and allow_superuser have a default"
+	const why = "and only tls, allow_plain_http, allow_cross_database and allow_superuser may be left out"
 	const callerWhy = "and every caller needs name, token_sha256, tools and databases"
 	server := func(path string) func(s, a map[string]any, e map[string]string) {
 		return func(s, a map[string]any, e map[string]string) { del(s, path) }
@@ -95,6 +95,47 @@ func TestLoadAppliesTheModeRules(t *testing.T) {
 			straza(s)
 			set(s, "gateway_tokens_sha256", []any{hashA, strings.ToUpper("ab" + hashA[2:])})
 		}, "$DIR/server.yaml has entry 2 of gateway_tokens_sha256 that is not 64 lowercase hexadecimal characters. Write each hash as adaptive-pg-mcp token prints it."},
+	})
+}
+
+func TestLoadAppliesTheTransportRules(t *testing.T) {
+	pair := map[string]any{"cert_file": "server.crt", "key_file": "server.key"}
+	cleartext := func(listen, loopback string) string {
+		return "$DIR/server.yaml has listen " + listen + ", which is not localhost or a loopback address, so without tls the bearer tokens of its callers would cross the network in cleartext. Add tls with cert_file and key_file, set listen to a loopback address such as " + loopback + ", or set allow_plain_http: true if something in front of the server encrypts the traffic, such as a service mesh."
+	}
+	runRefusals(t, []refusal{
+		{"tls with stdio", func(s, a map[string]any, e map[string]string) { set(s, "listen", "stdio"); set(s, "tls", pair) },
+			"$DIR/server.yaml sets tls with listen stdio, where no network connection carries the calls. Remove tls, or set listen to the address to serve HTTPS on."},
+		{"allow_plain_http with stdio", func(s, a map[string]any, e map[string]string) {
+			set(s, "listen", "stdio")
+			set(s, "allow_plain_http", true)
+		},
+			"$DIR/server.yaml sets allow_plain_http: true with listen stdio, where no HTTP is served. Remove allow_plain_http, or set listen to the address to serve HTTP on."},
+		{"tls and allow_plain_http", func(s, a map[string]any, e map[string]string) { set(s, "tls", pair); set(s, "allow_plain_http", true) },
+			"$DIR/server.yaml sets both tls and allow_plain_http: true, which contradict each other, because with tls adaptive-pg-mcp serves HTTPS only. Remove allow_plain_http to serve HTTPS, or remove tls to serve plain HTTP."},
+		{"tls without cert_file", func(s, a map[string]any, e map[string]string) {
+			set(s, "tls", map[string]any{"key_file": "server.key"})
+		},
+			"$DIR/server.yaml sets tls without cert_file, and tls needs both cert_file and key_file. Add tls.cert_file: the path to the PEM file of the server's certificate."},
+		{"tls as an empty mapping", func(s, a map[string]any, e map[string]string) { set(s, "tls", map[string]any{}) },
+			"$DIR/server.yaml sets tls without cert_file, and tls needs both cert_file and key_file. Add tls.cert_file: the path to the PEM file of the server's certificate."},
+		{"tls without key_file", func(s, a map[string]any, e map[string]string) {
+			set(s, "tls", map[string]any{"cert_file": "server.crt"})
+		},
+			"$DIR/server.yaml sets tls without key_file, and tls needs both cert_file and key_file. Add tls.key_file: the path to the PEM file of the certificate's private key."},
+		{"every IPv4 interface", func(s, a map[string]any, e map[string]string) { set(s, "listen", "0.0.0.0:8080") },
+			cleartext("0.0.0.0:8080", "127.0.0.1:8080")},
+		{"every IPv6 interface", func(s, a map[string]any, e map[string]string) { set(s, "listen", "[::]:9443") },
+			cleartext("[::]:9443", "127.0.0.1:9443")},
+		{"an address of another network", func(s, a map[string]any, e map[string]string) { set(s, "listen", "192.0.2.10:8080") },
+			cleartext("192.0.2.10:8080", "127.0.0.1:8080")},
+		{"a host name other than localhost", func(s, a map[string]any, e map[string]string) { set(s, "listen", "mcp.example.internal:8080") },
+			cleartext("mcp.example.internal:8080", "127.0.0.1:8080")},
+		{"allow_plain_http false", func(s, a map[string]any, e map[string]string) {
+			set(s, "listen", "0.0.0.0:8080")
+			set(s, "allow_plain_http", false)
+		},
+			cleartext("0.0.0.0:8080", "127.0.0.1:8080")},
 	})
 }
 

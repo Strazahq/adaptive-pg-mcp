@@ -4,6 +4,13 @@
 version: 1
 mode: standalone
 listen: 127.0.0.1:8080
+# A listen address beyond this machine needs tls, which serves HTTPS with
+# these PEM files. Relative paths resolve beside this file.
+# tls:
+#   cert_file: /etc/adaptive-pg-mcp/server.crt
+#   key_file: /etc/adaptive-pg-mcp/server.key
+# Only when something in front encrypts the traffic, such as a service mesh,
+# allow_plain_http: true serves plain HTTP beyond this machine instead.
 free_sql: read
 limits: { rows: 1000, bytes: 1048576, timeout: 30s, write_rows: 100 }
 access: ./access.yaml

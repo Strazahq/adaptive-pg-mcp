@@ -23,8 +23,9 @@ var builtinNames = []string{
 // checkCatalog is the catalog part of the start checks of docs/DESIGN.md
 // section 6. It loads the catalog folder of server.yaml, reports each
 // statement that no index lists and each cap that an entry raises above
-// server.yaml, prepares every indexed statement on each of
-// its databases through catalog.Check, and serves the tool of each entry
+// server.yaml, prepares and plans every indexed statement on each of
+// its databases through catalog.Check, reports each statement whose grants
+// the plan could not check, and serves the tool of each entry
 // that passes. A catalog that does not load refuses the start, and so do the
 // refusals of catalog.Check and an entry that Tool cannot turn into a tool.
 // ready holds the logins whose own checks ran. In mode standalone it then
@@ -44,9 +45,12 @@ func (s *Server) checkCatalog(ctx context.Context, ready map[pg.Login]bool) []Fi
 		for _, e := range entries {
 			findings = append(findings, raisedLimits(s.cfg.Limits, e)...)
 		}
-		typed, refusals := catalog.Check(ctx, s.pools, s.cfg.Limits.Timeout, entries, ready)
+		typed, refusals, unchecked := catalog.Check(ctx, s.pools, s.cfg.Limits.Timeout, entries, ready)
 		for _, r := range refusals {
 			findings = append(findings, Finding{Refuses: true, Text: r})
+		}
+		for _, r := range unchecked {
+			findings = append(findings, Finding{Text: r})
 		}
 		for _, e := range typed {
 			if err := s.addEntry(e); err != nil {
