@@ -264,9 +264,12 @@ the server does not serve.
 
 `list_databases` returns `{objects: [{value, id, title}], nextCursor}` in
 `structuredContent`. The value is the config name. The id is the cluster's
-system identifier and the database OID joined by a colon, because OIDs repeat
-across clusters and Straza fails a listing that holds one id under two
-values. A plain login reads the system identifier on 14 to 18, because
+system identifier, the database OID and the config name, joined by colons.
+OIDs repeat across clusters, and a standby or a restored copy of a database
+keeps the system identifier and the OID of its source, while Straza fails a
+listing that holds one id under two values. With the config name, a database
+and its copy listed under two names get two ids, and a rename in server.yaml
+gives the database a new id. A plain login reads the system identifier on 14 to 18, because
 `pg_control_system()` keeps its default EXECUTE grant to PUBLIC. The id is
 read on the database's read login, and a page with an id that cannot be read
 is a tool error, because an item without an id would hide a database that was
@@ -370,9 +373,10 @@ and a closing `check:` line, and it exits 1 when the start would be refused.
 Every refusal says what failed, why, and what to do. The build quotes these
 word for word:
 
-- `sales_eu was dropped and created again after Straza listed it, so the
-  call is refused. Try again once Straza lists the databases again, or ask an
-  administrator to refresh the list.`
+- `the id of sales_eu differs from the one Straza listed, so the call is
+  refused. The database was dropped and created again, or server.yaml now
+  gives its name to another database. Try again once Straza lists the
+  databases again, or ask an administrator to refresh the list.`
 - `update_rows on helpdesk would change 1,240 rows and the cap is 100, so
   nothing was changed. Narrow the where filter, or ask an administrator to
   raise write_rows.`

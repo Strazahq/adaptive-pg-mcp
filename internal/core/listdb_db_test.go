@@ -88,7 +88,7 @@ func TestListDatabases(t *testing.T) {
 				"SALES_EU_DSN":       reader.DSN(t, dbs["sales_eu"]),
 			}
 			object := func(name string) listedDatabase {
-				return listedDatabase{Value: name, ID: idOf(t, dbs[name]), Title: name}
+				return listedDatabase{Value: name, ID: idOf(t, dbs[name], name), Title: name}
 			}
 
 			t.Run("straza pages through every database", func(t *testing.T) {
@@ -145,6 +145,23 @@ func TestListDatabases(t *testing.T) {
 				res := callList(t, overStdio(t, srv, tokenA, ""), map[string]any{"cursor": base64.RawURLEncoding.EncodeToString([]byte("finance"))})
 				if !res.IsError || !strings.HasPrefix(textOf(t, res), "the cursor of list_databases does not decode to a page of this listing") {
 					t.Errorf("a cursor naming finance answered %v %+v, want the cursor refusal", res.IsError, res.Content)
+				}
+			})
+
+			t.Run("a database and its copy under two names get two ids", func(t *testing.T) {
+				copyEnv := map[string]string{}
+				for k, v := range env {
+					copyEnv[k] = v
+				}
+				copyEnv["FINANCE_DSN"] = reader.DSN(t, dbs["sales_eu"])
+				got := page(t, callList(t, overStdio(t, New(loadMode(t, "straza", copyEnv), slog.New(slog.DiscardHandler)), gatewayToken, ""), nil))
+				want := []listedDatabase{
+					{Value: "finance", ID: idOf(t, dbs["sales_eu"], "finance"), Title: "finance"},
+					object("helpdesk"),
+					object("sales_eu"),
+				}
+				if !reflect.DeepEqual(got.Objects, want) || want[0].ID == want[2].ID {
+					t.Errorf("list_databases answered %+v, want %+v with two ids for the one database", got.Objects, want)
 				}
 			})
 		})

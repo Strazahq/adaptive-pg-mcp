@@ -26,8 +26,8 @@ func started(t *testing.T, dsn string) *Server {
 	return srv
 }
 
-// idOf reads the id of d as the superuser does: the system identifier and the OID, joined by a colon.
-func idOf(t *testing.T, d pgtest.Database) string {
+// idOf reads the id of d under the config name name as the superuser does: the system identifier, the OID and name, joined by colons.
+func idOf(t *testing.T, d pgtest.Database, name string) string {
 	t.Helper()
 	// pg_control_system answers the identifier as a signed bigint, so the id carries a minus sign when its top bit is set.
 	var system int64
@@ -39,7 +39,7 @@ func idOf(t *testing.T, d pgtest.Database) string {
 	if err := admin.QueryRow(t.Context(), "SELECT oid FROM pg_database WHERE datname = $1", d.Name).Scan(&oid); err != nil {
 		t.Fatalf("reading the OID of %v: %v", d, err)
 	}
-	return strconv.FormatInt(system, 10) + ":" + strconv.FormatUint(uint64(oid), 10)
+	return strconv.FormatInt(system, 10) + ":" + strconv.FormatUint(uint64(oid), 10) + ":" + name
 }
 
 // checkOn runs checkObjectID for sales_eu with meta on a read transaction of srv, and returns its refusal or empty.
@@ -56,7 +56,7 @@ func checkOn(t *testing.T, srv *Server, meta mcp.Meta) string {
 
 const (
 	// recreated is the refusal of a call whose id is not the database's id now.
-	recreated = "sales_eu was dropped and created again after Straza listed it, so the call is refused. Try again once Straza lists the databases again, or ask an administrator to refresh the list."
+	recreated = "the id of sales_eu differs from the one Straza listed, so the call is refused. The database was dropped and created again, or server.yaml now gives its name to another database. Try again once Straza lists the databases again, or ask an administrator to refresh the list."
 	// notAString is the refusal of a call whose id is not a usable string.
 	notAString = "the call carries an ai.straza/object-id that is empty or not a string, so the call is refused. Straza sends the id that list_databases answered as a string, so send the call through Straza."
 )
@@ -66,7 +66,7 @@ func TestTheIDReadsOnEveryLogin(t *testing.T) {
 		t.Run(s.String(), func(t *testing.T) {
 			l := newLogins(t, s)
 			d := pgtest.NewDatabase(t, s)
-			want := idOf(t, d)
+			want := idOf(t, d, "sales_eu")
 			cases := []struct {
 				name  string
 				login pgtest.Login
@@ -94,7 +94,7 @@ func TestIDCheck(t *testing.T) {
 			l := newLogins(t, s)
 			d := pgtest.NewDatabase(t, s)
 			other := pgtest.NewDatabase(t, s)
-			before, otherID := idOf(t, d), idOf(t, other)
+			before, otherID := idOf(t, d, "sales_eu"), idOf(t, other, "sales_eu")
 
 			srv := started(t, l.plain.DSN(t, d))
 			cases := []struct {
@@ -107,6 +107,7 @@ func TestIDCheck(t *testing.T) {
 				{"other _meta keys pass", mcp.Meta{"io.modelcontextprotocol/protocolVersion": "2026-07-28"}, ""},
 				{"the id now passes", mcp.Meta{objectIDKey: before}, ""},
 				{"the id of another database is refused", mcp.Meta{objectIDKey: otherID}, recreated},
+				{"the id of the same database under another config name is refused", mcp.Meta{objectIDKey: idOf(t, d, "sales_eu_copy")}, recreated},
 				{"an id with a space is refused", mcp.Meta{objectIDKey: before + " "}, recreated},
 				{"an empty id is refused", mcp.Meta{objectIDKey: ""}, notAString},
 				{"a number is refused", mcp.Meta{objectIDKey: 42}, notAString},
@@ -128,7 +129,7 @@ func TestIDCheck(t *testing.T) {
 					t.Fatalf("%s: %v", sql, err)
 				}
 			}
-			after := idOf(t, d)
+			after := idOf(t, d, "sales_eu")
 			if after == before {
 				t.Fatalf("the id %s stayed the same after the database was dropped and created again", after)
 			}

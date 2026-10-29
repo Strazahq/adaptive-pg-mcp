@@ -5,11 +5,6 @@ tools/stategate.sh enforces it. Close an item by deleting its line.
 
 ## P owner actions
 
-- P-003 waiting-owner core | Confirm the names the M1 lane chose: the HTTP endpoint /mcp and the token command's output lines token: and token_sha256:. | internal/core/http.go | [doc 10-28]
-- P-004 waiting-owner core | Decide whether a browser-based client may call over HTTP, since the server refuses every request with an Origin header and allowing one needs a config key the owner names. | internal/core/http.go | [live 10-28]
-- P-006 waiting-owner core | Confirm the names the unit 3a lane chose: the check output prefixes refusal:, report: and check:, a list_databases page of 25 with the config name as title, and the report sentences in internal/core/start.go. | internal/core/start.go | [doc 10-28]
-- P-010 waiting-owner core | Decide how the database id stays unique across physical copies, since a standby or a restored base backup has the same system identifier and OIDs, so a config that lists a primary and its copy gives one id under two values and Straza fails the listing. | internal/core/objectid.go | [live 10-28]
-- P-011 waiting-owner core | Confirm the shapes unit 3b chose: order_by entries of column and direction asc or desc, returning as a list of columns, aggregate functions count, sum, avg, min and max, a page of 100 for list_schemas and list_tables, schema defaulting to public, and the output columns of the listing and describe tools. | internal/core/schema.go | [doc 10-28]
 
 ## Q queue
 

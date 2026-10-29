@@ -12,10 +12,10 @@ import (
 // objectIDKey is the _meta key in which Straza sends the id of the database a call names.
 const objectIDKey = "ai.straza/object-id"
 
-// idSQL reads the id of the database of the connection: the system
-// identifier of its cluster and its OID, joined by a colon. OIDs repeat
-// across clusters, and a database dropped and created again under the same
-// name gets a new OID, so the pair names one database once.
+// idSQL reads the system identifier of the cluster of the connection and
+// the OID of its database, joined by a colon. OIDs repeat across clusters,
+// and a database dropped and created again under the same name gets a new
+// OID, so the pair names one database once. readID adds the config name.
 const idSQL = `SELECT s.system_identifier::text || ':' || d.oid::text
 FROM pg_control_system() s, pg_database d
 WHERE d.datname = current_database()`
@@ -23,14 +23,19 @@ WHERE d.datname = current_database()`
 // errNotStarted refuses a database call on a server whose start checks have not opened the pools.
 var errNotStarted = errors.New("adaptive-pg-mcp has not run its start checks, so it has no connection to the database")
 
-// readID reads the id of the database on tx.
-func readID(ctx context.Context, tx *pg.Tx) (string, error) {
+// readID reads the id of database on tx: what idSQL reads, a colon and the
+// config name, because a standby or a restored copy of a database has the
+// same system identifier and OID, and two config names must not share an id.
+func readID(ctx context.Context, tx *pg.Tx, database string) (string, error) {
 	rows, err := tx.Query(ctx, idSQL)
 	if err != nil {
 		return "", err
 	}
 	var id string
-	return id, exactlyOne(rows, &id)
+	if err := exactlyOne(rows, &id); err != nil {
+		return "", err
+	}
+	return id + ":" + database, nil
 }
 
 // readIDOn reads the id of the database of login l in a read-only transaction of its own.
@@ -41,7 +46,7 @@ func (s *Server) readIDOn(ctx context.Context, l pg.Login) (string, error) {
 	var id string
 	err := s.pools.Run(ctx, l, pg.ReadOnly, s.cfg.Limits.Timeout, func(tx *pg.Tx) error {
 		var err error
-		id, err = readID(ctx, tx)
+		id, err = readID(ctx, tx, l.Database)
 		return err
 	})
 	return id, err
@@ -61,12 +66,12 @@ func (s *Server) checkObjectID(ctx context.Context, tx *pg.Tx, database string, 
 	if !isString || sent == "" {
 		return errors.New("the call carries an " + objectIDKey + " that is empty or not a string, so the call is refused. Straza sends the id that list_databases answered as a string, so send the call through Straza.")
 	}
-	id, err := readID(ctx, tx)
+	id, err := readID(ctx, tx, database)
 	if err != nil {
 		return errors.New("adaptive-pg-mcp cannot read the id of " + database + " to compare it with the " + objectIDKey + " of the call, because " + s.pools.Reason(err) + ", so the call is refused. Try again, and if it fails again, run adaptive-pg-mcp check to see why the login cannot read it.")
 	}
 	if id != sent {
-		return errors.New(database + " was dropped and created again after Straza listed it, so the call is refused. Try again once Straza lists the databases again, or ask an administrator to refresh the list.")
+		return errors.New("the id of " + database + " differs from the one Straza listed, so the call is refused. The database was dropped and created again, or server.yaml now gives its name to another database. Try again once Straza lists the databases again, or ask an administrator to refresh the list.")
 	}
 	return nil
 }

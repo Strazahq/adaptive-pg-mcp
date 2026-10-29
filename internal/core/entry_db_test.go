@@ -386,8 +386,8 @@ func TestCatalogTools(t *testing.T) {
 				})
 			}
 			t.Run("the id check runs on the call's own transaction", func(t *testing.T) {
-				res := callTool(t, cs, "close_tickets", helpdesk(map[string]any{"up_to": 9}), mcp.Meta{objectIDKey: idOf(t, other)})
-				want := "helpdesk was dropped and created again after Straza listed it, so the call is refused. Try again once Straza lists the databases again, or ask an administrator to refresh the list."
+				res := callTool(t, cs, "close_tickets", helpdesk(map[string]any{"up_to": 9}), mcp.Meta{objectIDKey: idOf(t, other, "helpdesk")})
+				want := "the id of helpdesk differs from the one Straza listed, so the call is refused. The database was dropped and created again, or server.yaml now gives its name to another database. Try again once Straza lists the databases again, or ask an administrator to refresh the list."
 				if got := textOf(t, res); !res.IsError || got != want {
 					t.Errorf("close_tickets with the id of another database answered %v:\n got %s\nwant %s", res.IsError, got, want)
 				}
@@ -409,7 +409,7 @@ func TestCatalogTools(t *testing.T) {
 				{"a read through a parameter cast to a domain", "notes_equal", map[string]any{"note": "printer"}, nil, `[[1]]`, "", false, nil},
 				{"a read stops at its own byte cap", "ticket_page", map[string]any{}, nil, `[[1,"open"],[2,"open"],[3,"open"]]`,
 					"ticket_page answered 3 rows from helpdesk. More rows follow, and the answer stopped before the next row, because it would pass the byte cap of 30 bytes. Narrow the call through its arguments, or ask an administrator to raise the limits of ticket_page in the catalog.", true, nil},
-				{"a write under its own cap, with the right id", "close_tickets", map[string]any{"up_to": 4}, mcp.Meta{objectIDKey: idOf(t, d)},
+				{"a write under its own cap, with the right id", "close_tickets", map[string]any{"up_to": 4}, mcp.Meta{objectIDKey: idOf(t, d, "helpdesk")},
 					`[]`, "close_tickets changed 4 rows on helpdesk and answered 0 rows.", nil, 4.0},
 				{"a read on a login other than read or write", "ledger_total", map[string]any{}, nil, `[["` + finance.Name + `",15]]`, "", false, nil},
 			}

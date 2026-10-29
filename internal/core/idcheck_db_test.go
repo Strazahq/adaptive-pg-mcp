@@ -55,7 +55,7 @@ func TestIDCheckInDataTools(t *testing.T) {
 				"GRANT CREATE ON SCHEMA public TO {login}")
 			srv := New(loadData(t, "read-write", "", single, map[string]string{"SALES_EU_DSN": l.DSN(t, d)}), slog.New(slog.DiscardHandler))
 			cs := overStdio(t, srv, gatewayToken, "")
-			right, wrong := mcp.Meta{objectIDKey: idOf(t, d)}, mcp.Meta{objectIDKey: idOf(t, other)}
+			right, wrong := mcp.Meta{objectIDKey: idOf(t, d, "sales_eu")}, mcp.Meta{objectIDKey: idOf(t, other, "sales_eu")}
 			for _, c := range cases {
 				t.Run(c.tool, func(t *testing.T) {
 					res := callTool(t, cs, c.tool, c.wrong, wrong)
