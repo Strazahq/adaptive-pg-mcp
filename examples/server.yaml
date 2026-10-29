@@ -1,4 +1,4 @@
-# An example server.yaml in mode standalone. docs/DESIGN.md section 3 holds
+# An example server.yaml in standalone mode. docs/DESIGN.md section 3 holds
 # every key. Each dsn_env names an environment variable that holds the
 # connection string, so no password sits in this file.
 version: 1

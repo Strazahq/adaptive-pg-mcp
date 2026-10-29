@@ -16,7 +16,8 @@ func TestDSNNeverPrints(t *testing.T) {
 	if d.Reveal() != v {
 		t.Fatalf("Reveal returned %q, want the connection string", d.Reveal())
 	}
-	// held reaches the DSN through an unexported field, where fmt cannot call its methods.
+	// held reaches the DSN through an unexported field, where fmt cannot call
+	// its methods.
 	held := struct{ d DSN }{d}
 	login := Login{Env: "SALES_EU_DSN", DSN: d}
 	cfg := Config{Databases: map[string]Database{"sales_eu": {Logins: map[string]Login{"read": login}}}}

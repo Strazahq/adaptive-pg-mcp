@@ -98,7 +98,7 @@ func TestListDatabases(t *testing.T) {
 					t.Run(v, func(t *testing.T) {
 						cs := overStdio(t, srv, gatewayToken, v)
 						first := callList(t, cs, map[string]any{})
-						if got, want := textOf(t, first), "list_databases found 2 databases: finance and helpdesk. More follow, so call list_databases again with cursor set to nextCursor."; got != want {
+						if got, want := textOf(t, first), "list_databases found 2 databases: finance and helpdesk. More follow: pass nextCursor as cursor."; got != want {
 							t.Errorf("the first text is %q, want %q", got, want)
 						}
 						p1 := page(t, first)
@@ -143,7 +143,7 @@ func TestListDatabases(t *testing.T) {
 
 			t.Run("a standalone caller cannot page into another caller's databases", func(t *testing.T) {
 				res := callList(t, overStdio(t, srv, tokenA, ""), map[string]any{"cursor": base64.RawURLEncoding.EncodeToString([]byte("finance"))})
-				if !res.IsError || !strings.HasPrefix(textOf(t, res), "the cursor of list_databases does not decode to a page of this listing") {
+				if !res.IsError || !strings.HasPrefix(textOf(t, res), "the cursor of list_databases is not from this listing") {
 					t.Errorf("a cursor naming finance answered %v %+v, want the cursor refusal", res.IsError, res.Content)
 				}
 			})

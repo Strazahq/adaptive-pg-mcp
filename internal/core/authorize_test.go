@@ -103,17 +103,17 @@ func callTool(t *testing.T, cs *mcp.ClientSession, tool string, args any, meta m
 
 // notStarted is what a call that passes every check before its statement answers on a server without pools.
 func notStarted(tool, database string) string {
-	return tool + " on " + database + " cannot run, because adaptive-pg-mcp has not run its start checks, so it has no connection to the database. Serve it with adaptive-pg-mcp serve, which runs them before it serves."
+	return tool + " on " + database + " cannot run, because adaptive-pg-mcp has not run its start checks, so it has no connection to the database. This is a bug in adaptive-pg-mcp. Report it with the log."
 }
 
 func TestAuthorizationOnEveryRevision(t *testing.T) {
 	const (
-		toolRefused = "support_bot may not use update_rows, because its entry in access.yaml does not list that tool, so the call is refused. Use a tool that its entry lists, or ask an administrator to add update_rows to its tools."
-		dbRefused   = "support_bot may not use sales_eu, because its entry in access.yaml does not list that database, so the call is refused. Name a database that list_databases answers, or ask an administrator to add sales_eu to its databases."
-		freeRefused = "support_bot may not use query_sql, because its entry in access.yaml narrows it to tables, and free SQL can reach any table, so the call is refused. Use the table tools, such as read_rows, on its tables, or ask an administrator to remove tables from its entry."
+		toolRefused = "access.yaml does not list update_rows for support_bot. Use a listed tool, or ask an administrator to add it."
+		dbRefused   = "access.yaml does not list sales_eu for support_bot. Use a database that list_databases returns, or ask an administrator to add it."
+		freeRefused = "access.yaml narrows support_bot to tables, and query_sql can reach any table. Use a table tool such as read_rows, or ask an administrator to remove the tables of support_bot."
 	)
 	tableRefused := func(table string) string {
-		return "support_bot may not use " + table + " on helpdesk, because its entry in access.yaml narrows it to the tables public.tickets and audit.log, so the call is refused. Name one of those tables, or ask an administrator to add " + table + " to its tables."
+		return "access.yaml narrows support_bot to the tables public.tickets and audit.log, so it may not use " + table + " on helpdesk. Name one of those tables, or ask an administrator to add " + table + "."
 	}
 	where := []any{map[string]any{"column": "id", "op": "=", "value": 1}}
 	cases := []struct {
@@ -125,7 +125,7 @@ func TestAuthorizationOnEveryRevision(t *testing.T) {
 		{"a tool it does not list, before its arguments are read", "support_bot", "update_rows", map[string]any{"database": 5}, toolRefused},
 		{"a database its entry does not list", "support_bot", "read_rows", map[string]any{"database": "sales_eu", "table": "tickets"}, dbRefused},
 		{"a database it does not list, before its arguments are read", "support_bot", "read_rows", map[string]any{"database": "sales_eu", "no_such_argument": true}, dbRefused},
-		{"a database the config does not have", "support_bot", "read_rows", map[string]any{"database": "finance", "table": "tickets"}, "support_bot may not use finance, because its entry in access.yaml does not list that database, so the call is refused. Name a database that list_databases answers, or ask an administrator to add finance to its databases."},
+		{"a database the config does not have", "support_bot", "read_rows", map[string]any{"database": "finance", "table": "tickets"}, "access.yaml does not list finance for support_bot. Use a database that list_databases returns, or ask an administrator to add it."},
 		{"a table outside its tables", "support_bot", "read_rows", map[string]any{"database": "helpdesk", "table": "customers"}, tableRefused("public.customers")},
 		{"a table outside its tables, by schema", "support_bot", "read_rows", map[string]any{"database": "helpdesk", "schema": "private", "table": "tickets"}, tableRefused("private.tickets")},
 		{"a schema that differs only in case", "support_bot", "describe_table", map[string]any{"database": "helpdesk", "schema": "Public", "table": "tickets"}, tableRefused("Public.tickets")},
@@ -140,13 +140,13 @@ func TestAuthorizationOnEveryRevision(t *testing.T) {
 		{"a caller without tables reaches any table", "ops_bot", "update_rows", map[string]any{"database": "sales_eu", "schema": "billing", "table": "invoices", "set": map[string]any{"paid": true}, "where": where}, notStarted("update_rows", "sales_eu")},
 		{"a caller without tables may use free SQL", "ops_bot", "execute_sql", map[string]any{"database": "sales_eu", "sql": "SELECT 1"}, notStarted("execute_sql", "sales_eu")},
 		{"a caller without tables may use execute_ddl", "ops_bot", "execute_ddl", map[string]any{"database": "helpdesk", "sql": "CREATE TABLE t (a int)"}, notStarted("execute_ddl", "helpdesk")},
-		{"execute_ddl for a caller with tables", "support_bot", "execute_ddl", map[string]any{"database": "helpdesk", "sql": "DROP TABLE tickets"}, "support_bot may not use execute_ddl, because its entry in access.yaml narrows it to tables, and free SQL can reach any table, so the call is refused. Use the table tools, such as read_rows, on its tables, or ask an administrator to remove tables from its entry."},
-		{"execute_ddl when its entry does not list it", "nodb_bot", "execute_ddl", map[string]any{"database": "helpdesk", "sql": "DROP TABLE tickets"}, "nodb_bot may not use execute_ddl, because its entry in access.yaml does not list that tool, so the call is refused. Use a tool that its entry lists, or ask an administrator to add execute_ddl to its tools."},
-		{"list_databases when its entry does not list it", "support_bot", "list_databases", map[string]any{}, "support_bot may not use list_databases, because its entry in access.yaml does not list that tool, so the call is refused. Use a tool that its entry lists, or ask an administrator to add list_databases to its tools."},
-		{"list_databases when its entry does not list it, before its arguments are read", "support_bot", "list_databases", map[string]any{"cursor": 5}, "support_bot may not use list_databases, because its entry in access.yaml does not list that tool, so the call is refused. Use a tool that its entry lists, or ask an administrator to add list_databases to its tools."},
-		{"list_databases when its entry lists it passes", "ops_bot", "list_databases", map[string]any{}, "list_databases cannot read the id of helpdesk on its read login, because adaptive-pg-mcp has not run its start checks, so it has no connection to the database, so it answers no page. Run adaptive-pg-mcp check to see why, and fix the login."},
-		{"another caller is refused a tool it does not list", "ops_bot", "delete_rows", map[string]any{"database": "helpdesk", "table": "tickets", "where": where}, "ops_bot may not use delete_rows, because its entry in access.yaml does not list that tool, so the call is refused. Use a tool that its entry lists, or ask an administrator to add delete_rows to its tools."},
-		{"a catalog tool its entry does not list", "ops_bot", "revenue_eu", map[string]any{"database": "sales_eu", "month": "2026-09-01"}, "ops_bot may not use revenue_eu, because its entry in access.yaml does not list that tool, so the call is refused. Use a tool that its entry lists, or ask an administrator to add revenue_eu to its tools."},
+		{"execute_ddl for a caller with tables", "support_bot", "execute_ddl", map[string]any{"database": "helpdesk", "sql": "DROP TABLE tickets"}, "access.yaml narrows support_bot to tables, and execute_ddl can reach any table. Use a table tool such as read_rows, or ask an administrator to remove the tables of support_bot."},
+		{"execute_ddl when its entry does not list it", "nodb_bot", "execute_ddl", map[string]any{"database": "helpdesk", "sql": "DROP TABLE tickets"}, "access.yaml does not list execute_ddl for nodb_bot. Use a listed tool, or ask an administrator to add it."},
+		{"list_databases when its entry does not list it", "support_bot", "list_databases", map[string]any{}, "access.yaml does not list list_databases for support_bot. Use a listed tool, or ask an administrator to add it."},
+		{"list_databases when its entry does not list it, before its arguments are read", "support_bot", "list_databases", map[string]any{"cursor": 5}, "access.yaml does not list list_databases for support_bot. Use a listed tool, or ask an administrator to add it."},
+		{"list_databases when its entry lists it passes", "ops_bot", "list_databases", map[string]any{}, "list_databases cannot read the id of helpdesk on its read login, because adaptive-pg-mcp has not run its start checks, so it has no connection to the database. Try again, or ask an administrator to run adaptive-pg-mcp check."},
+		{"another caller is refused a tool it does not list", "ops_bot", "delete_rows", map[string]any{"database": "helpdesk", "table": "tickets", "where": where}, "access.yaml does not list delete_rows for ops_bot. Use a listed tool, or ask an administrator to add it."},
+		{"a catalog tool its entry does not list", "ops_bot", "revenue_eu", map[string]any{"database": "sales_eu", "month": "2026-09-01"}, "access.yaml does not list revenue_eu for ops_bot. Use a listed tool, or ask an administrator to add it."},
 		{"a catalog tool on a database its entry does not list", "support_bot", "tickets_by_day", map[string]any{"database": "sales_eu", "day": "2026-10-01"}, dbRefused},
 		{"a catalog tool its entry lists passes, also for a caller narrowed to tables", "support_bot", "tickets_by_day", map[string]any{"database": "helpdesk", "day": "2026-10-01"}, notStarted("tickets_by_day", "helpdesk")},
 	}

@@ -81,10 +81,10 @@ func TestReadTools(t *testing.T) {
 		{"list_tables of one schema", "list_tables", map[string]any{"schema": "audit"}, `[["audit","log","table"]]`, "list_tables found 1 table in the schema audit of helpdesk.", false},
 		{"list_tables of a schema the login may not use", "list_tables", map[string]any{"schema": "hidden"}, `[]`, "list_tables found 0 tables in the schema hidden of helpdesk.", false},
 		{"describe_table", "describe_table", map[string]any{"table": "tickets"}, `[["id","integer",false,null,true],["status","text",false,"'open'::text",false],["note","text",true,null,false]]`, "describe_table found 3 columns of public.tickets on helpdesk.", false},
-		{"read_rows of every column", "read_rows", map[string]any{"table": "tickets", "order_by": byID}, `[[1,"open","printer"],[2,"closed",null],[3,"open","Printer jam"],[4,"pending","VPN"]]`, "read_rows answered 4 rows of public.tickets on helpdesk.", false},
-		{"read_rows of a view", "read_rows", map[string]any{"table": "open_tickets", "order_by": byID}, `[[1,"printer"],[3,"Printer jam"]]`, "read_rows answered 2 rows of public.open_tickets on helpdesk.", false},
-		{"read_rows of a name that breaks unquoted SQL", "read_rows", map[string]any{"table": oddTable, "columns": []any{`we"ird`}}, `[[7]]`, "read_rows answered 1 row of public." + oddTable + " on helpdesk.", false},
-		{"read_rows of another schema", "read_rows", map[string]any{"schema": "audit", "table": "log"}, `[]`, "read_rows answered 0 rows of audit.log on helpdesk.", false},
+		{"read_rows of every column", "read_rows", map[string]any{"table": "tickets", "order_by": byID}, `[[1,"open","printer"],[2,"closed",null],[3,"open","Printer jam"],[4,"pending","VPN"]]`, "read_rows returned 4 rows of public.tickets on helpdesk.", false},
+		{"read_rows of a view", "read_rows", map[string]any{"table": "open_tickets", "order_by": byID}, `[[1,"printer"],[3,"Printer jam"]]`, "read_rows returned 2 rows of public.open_tickets on helpdesk.", false},
+		{"read_rows of a name that breaks unquoted SQL", "read_rows", map[string]any{"table": oddTable, "columns": []any{`we"ird`}}, `[[7]]`, "read_rows returned 1 row of public." + oddTable + " on helpdesk.", false},
+		{"read_rows of another schema", "read_rows", map[string]any{"schema": "audit", "table": "log"}, `[]`, "read_rows returned 0 rows of audit.log on helpdesk.", false},
 		{"=", "read_rows", map[string]any{"table": "tickets", "columns": []any{"id"}, "order_by": byID, "where": where(cond("status", "=", "open"))}, `[[1],[3]]`, "", false},
 		{"<>", "read_rows", map[string]any{"table": "tickets", "columns": []any{"id"}, "order_by": byID, "where": where(cond("status", "<>", "open"))}, `[[2],[4]]`, "", false},
 		{"<", "read_rows", map[string]any{"table": "tickets", "columns": []any{"id"}, "order_by": byID, "where": where(cond("id", "<", 2))}, `[[1]]`, "", false},
@@ -99,10 +99,10 @@ func TestReadTools(t *testing.T) {
 		{"ilike", "read_rows", map[string]any{"table": "tickets", "columns": []any{"id"}, "order_by": byID, "where": where(cond("note", "ilike", "print%"))}, `[[1],[3]]`, "", false},
 		{"two entries match both", "read_rows", map[string]any{"table": "tickets", "columns": []any{"id"}, "where": where(cond("status", "=", "open"), cond("note", "ilike", "%jam"))}, `[[3]]`, "", false},
 		{"a value that reads as SQL stays a value", "read_rows", map[string]any{"table": "tickets", "columns": []any{"id"}, "where": where(cond("note", "=", "x' OR '1'='1"))}, `[]`, "", false},
-		{"order_by desc with a limit", "read_rows", map[string]any{"table": "tickets", "columns": []any{"id"}, "order_by": []any{map[string]any{"column": "id", "direction": "desc"}}, "limit": 2}, `[[4],[3]]`, "read_rows answered 2 rows of public.tickets on helpdesk. More rows follow than the limit of 2.", true},
-		{"count", "aggregate", map[string]any{"table": "tickets", "function": "count"}, `[[4]]`, "aggregate answered count of public.tickets on helpdesk: 4.", false},
+		{"order_by desc with a limit", "read_rows", map[string]any{"table": "tickets", "columns": []any{"id"}, "order_by": []any{map[string]any{"column": "id", "direction": "desc"}}, "limit": 2}, `[[4],[3]]`, "read_rows returned 2 rows of public.tickets on helpdesk. More rows exist beyond the limit of 2.", true},
+		{"count", "aggregate", map[string]any{"table": "tickets", "function": "count"}, `[[4]]`, "aggregate returned count of public.tickets on helpdesk: 4.", false},
 		{"count of a column skips nulls", "aggregate", map[string]any{"table": "tickets", "function": "count", "column": "note"}, `[[3]]`, "", false},
-		{"count by group", "aggregate", map[string]any{"table": "tickets", "function": "count", "group_by": []any{"status"}}, `[["closed",1],["open",2],["pending",1]]`, "aggregate answered count of public.tickets on helpdesk for 3 groups.", false},
+		{"count by group", "aggregate", map[string]any{"table": "tickets", "function": "count", "group_by": []any{"status"}}, `[["closed",1],["open",2],["pending",1]]`, "aggregate returned count of public.tickets on helpdesk for 3 groups.", false},
 		{"sum with a filter", "aggregate", map[string]any{"table": "tickets", "function": "sum", "column": "id", "where": where(cond("status", "=", "open"))}, `[[4]]`, "", false},
 		{"avg", "aggregate", map[string]any{"table": "tickets", "function": "avg", "column": "id"}, `[[2.5]]`, "", false},
 		{"max", "aggregate", map[string]any{"table": "tickets", "function": "max", "column": "id"}, `[[4]]`, "", false},
@@ -112,13 +112,13 @@ func TestReadTools(t *testing.T) {
 		args       map[string]any
 		want       string
 	}{
-		{"a table the login may not read", "read_rows", map[string]any{"table": "secrets"}, "read_rows found no table public.secrets on helpdesk that its login may use, so the call is refused. Call list_tables to see the tables it may use."},
-		{"a schema the login may not use", "read_rows", map[string]any{"schema": "hidden", "table": "x"}, "read_rows found no table hidden.x on helpdesk that its login may use, so the call is refused. Call list_tables to see the tables it may use."},
-		{"a table that does not exist", "aggregate", map[string]any{"table": "nope", "function": "count"}, "aggregate found no table public.nope on helpdesk that its login may use, so the call is refused. Call list_tables to see the tables it may use."},
-		{"describe of a table the login may not read", "describe_table", map[string]any{"table": "secrets"}, "describe_table found no table public.secrets on helpdesk that its login may use, so the call is refused. Call list_tables to see the tables it may use."},
-		{"a column that does not exist", "read_rows", map[string]any{"table": "tickets", "columns": []any{"nope"}}, `public.tickets on helpdesk has no column "nope" that the login may use, so read_rows is refused. Call describe_table to see its columns.`},
-		{"a where column that does not exist", "read_rows", map[string]any{"table": "tickets", "where": where(cond("nope", "=", 1))}, `public.tickets on helpdesk has no column "nope" that the login may use, so read_rows is refused. Call describe_table to see its columns.`},
-		{"a value Postgres cannot read as the column's type", "read_rows", map[string]any{"table": "tickets", "where": where(cond("id", "=", "abc"))}, `read_rows on helpdesk failed, because the server answered: invalid input syntax for type integer: "abc" (SQLSTATE 22P02), so nothing was read. Correct the call as the reason says, and call it again.`},
+		{"a table the login may not read", "read_rows", map[string]any{"table": "secrets"}, "read_rows found no table public.secrets on helpdesk that its login may use. Call list_tables for the tables it may use."},
+		{"a schema the login may not use", "read_rows", map[string]any{"schema": "hidden", "table": "x"}, "read_rows found no table hidden.x on helpdesk that its login may use. Call list_tables for the tables it may use."},
+		{"a table that does not exist", "aggregate", map[string]any{"table": "nope", "function": "count"}, "aggregate found no table public.nope on helpdesk that its login may use. Call list_tables for the tables it may use."},
+		{"describe of a table the login may not read", "describe_table", map[string]any{"table": "secrets"}, "describe_table found no table public.secrets on helpdesk that its login may use. Call list_tables for the tables it may use."},
+		{"a column that does not exist", "read_rows", map[string]any{"table": "tickets", "columns": []any{"nope"}}, `public.tickets on helpdesk has no column "nope" that the login may use. Call describe_table to see its columns.`},
+		{"a where column that does not exist", "read_rows", map[string]any{"table": "tickets", "where": where(cond("nope", "=", 1))}, `public.tickets on helpdesk has no column "nope" that the login may use. Call describe_table to see its columns.`},
+		{"a value Postgres cannot read as the column's type", "read_rows", map[string]any{"table": "tickets", "where": where(cond("id", "=", "abc"))}, `read_rows on helpdesk failed, because Postgres said: invalid input syntax for type integer: "abc" (SQLSTATE 22P02). Correct the call and try again.`},
 	}
 	for _, s := range pgtest.Servers(t) {
 		t.Run(s.String(), func(t *testing.T) {
@@ -181,7 +181,7 @@ func TestReadTools(t *testing.T) {
 				cs, out := served(t, l, d, "off", "{ rows: 1000, bytes: 30, timeout: 30s, write_rows: 100 }")
 				res := callTool(t, cs, "read_rows", helpdesk(map[string]any{"table": "tickets", "order_by": byID}), nil)
 				m := out.check(t, "read_rows", res)
-				want := "read_rows answered 1 row of public.tickets on helpdesk. More rows follow, and the answer stopped before the next row, because it would pass the byte cap of 30 bytes. Narrow the where filter or the columns, or page with order_by and a where filter past the last row."
+				want := "read_rows returned 1 row of public.tickets on helpdesk. More rows exist beyond the byte cap of 30 bytes. Narrow the where filter or the columns, or page with order_by and a where filter past the last row."
 				if rowsJSON(t, m) != `[[1,"open","printer"]]` || m["truncated"] != true || textOf(t, res) != want {
 					t.Errorf("read_rows at a byte cap of 30 answered %v %s", m, textOf(t, res))
 				}

@@ -32,18 +32,20 @@ type deleteRowsArgs struct {
 	Returning []string    `json:"returning"`
 }
 
-// narrowWhere is the advice of a write cap refusal of update_rows and delete_rows.
+// narrowWhere is the advice of a write cap refusal of update_rows and
+// delete_rows.
 const narrowWhere = "Narrow the where filter"
 
-// writeLimits says what the caps of every write tool are, for its description.
+// writeLimits describes the caps of the write tools.
 func (s *Server) writeLimits() string {
-	return "A call that would change more than " + count(int64(s.cfg.Limits.WriteRows)) + " rows is rolled back and refused. " +
-		"It answers rowsAffected, and the columns and rows that returning names, at most " + count(int64(s.cfg.Limits.Rows)) + " rows."
+	return "Rolls back a call that changes more than " + count(int64(s.cfg.Limits.WriteRows)) + " rows, triggers and cascades included. " +
+		"Returns rowsAffected and up to " + count(int64(s.cfg.Limits.Rows)) + " returning rows."
 }
 
-// valuesProp is an object of column names and the values to write, with at least one column.
+// valuesProp is an object of column names and the values to write, with at
+// least one column.
 func valuesProp(description string) *jsonschema.Schema {
-	return &jsonschema.Schema{Type: "object", Description: description, MinProperties: atLeast(1), AdditionalProperties: &jsonschema.Schema{Description: "The value for the column, which travels as a bind parameter."}}
+	return &jsonschema.Schema{Type: "object", Description: description, MinProperties: atLeast(1), AdditionalProperties: &jsonschema.Schema{Description: "The column value, sent as a bind parameter."}}
 }
 
 // insertRowsTool is insert_rows as tools/list shows it.
@@ -51,11 +53,11 @@ func (s *Server) insertRowsTool() *dataTool {
 	in := s.input(map[string]*jsonschema.Schema{
 		"schema": schemaProp(),
 		"table":  tableProp("to insert into"),
-		"rows": {Type: "array", MinItems: atLeast(1), Description: "The rows to insert, each an object of column names and values. A column a row leaves out takes its default.",
-			Items: valuesProp("One row: column names and their values.")},
+		"rows": {Type: "array", MinItems: atLeast(1), Description: "The rows to insert. An omitted column takes its default.",
+			Items: valuesProp("One row, as column names and values.")},
 		"returning": returningProp(),
 	}, []string{"schema", "table", "rows", "returning"}, "table", "rows")
-	description := "Inserts rows into one table in a read-write transaction on the write login. " + s.writeLimits()
+	description := "Inserts rows into one table. " + s.writeLimits()
 	return &dataTool{tool: writeTool(insertRowsName, description, in), write: true, run: s.insertRows}
 }
 
@@ -64,11 +66,11 @@ func (s *Server) updateRowsTool() *dataTool {
 	in := s.input(map[string]*jsonschema.Schema{
 		"schema":    schemaProp(),
 		"table":     tableProp("to update"),
-		"set":       valuesProp("The columns to change and their new values."),
-		"where":     whereProp(1, "The rows to change: each entry is {column, op, value}, and a row must match every entry. It needs at least one entry."),
+		"set":       valuesProp("The columns to set and their new values."),
+		"where":     whereProp(1, "Conditions joined by AND that pick the rows to update."),
 		"returning": returningProp(),
 	}, []string{"schema", "table", "set", "where", "returning"}, "table", "set", "where")
-	description := "Updates the rows of one table that match a where filter, in a read-write transaction on the write login. The filter needs at least one entry. " + s.writeLimits()
+	description := "Updates the rows of one table that match a where filter. " + s.writeLimits()
 	return &dataTool{tool: writeTool(updateRowsName, description, in), write: true, run: s.updateRows}
 }
 
@@ -77,15 +79,15 @@ func (s *Server) deleteRowsTool() *dataTool {
 	in := s.input(map[string]*jsonschema.Schema{
 		"schema":    schemaProp(),
 		"table":     tableProp("to delete from"),
-		"where":     whereProp(1, "The rows to delete: each entry is {column, op, value}, and a row must match every entry. It needs at least one entry."),
+		"where":     whereProp(1, "Conditions joined by AND that pick the rows to delete."),
 		"returning": returningProp(),
 	}, []string{"schema", "table", "where", "returning"}, "table", "where")
-	description := "Deletes the rows of one table that match a where filter, in a read-write transaction on the write login. The filter needs at least one entry. " + s.writeLimits()
+	description := "Deletes the rows of one table that match a where filter. " + s.writeLimits()
 	return &dataTool{tool: writeTool(deleteRowsName, description, in), write: true, run: s.deleteRows}
 }
 
-// insertRows answers insert_rows: INSERT of the columns any row names, in
-// table order, with DEFAULT where a row leaves a column out.
+// insertRows runs insert_rows. It inserts every column that any row names, in
+// table order, with DEFAULT where a row omits one.
 func (s *Server) insertRows(ctx context.Context, c *call, raw map[string]any) *mcp.CallToolResult {
 	var args insertRowsArgs
 	if err := c.decode(raw, &args); err != nil {
@@ -94,7 +96,7 @@ func (s *Server) insertRows(ctx context.Context, c *call, raw map[string]any) *m
 	if err := args.resolve(c); err != nil {
 		return toolError(err)
 	}
-	return c.change(ctx, args.target, args.Returning, "Send at most "+count(int64(s.cfg.Limits.WriteRows))+" rows in one call", func(q *statement, cols *tableColumns) error {
+	return c.change(ctx, args.target, args.Returning, "Send at most "+count(int64(s.cfg.Limits.WriteRows))+" rows per call", func(q *statement, cols *tableColumns) error {
 		for _, row := range args.Rows {
 			for name := range row {
 				if _, err := cols.get(name); err != nil {
@@ -140,7 +142,6 @@ func (s *Server) insertRows(ctx context.Context, c *call, raw map[string]any) *m
 	})
 }
 
-// updateRows answers update_rows: UPDATE of the set columns, in table order, on the rows the where filter matches.
 func (s *Server) updateRows(ctx context.Context, c *call, raw map[string]any) *mcp.CallToolResult {
 	var args updateRowsArgs
 	if err := c.decode(raw, &args); err != nil {
@@ -175,7 +176,6 @@ func (s *Server) updateRows(ctx context.Context, c *call, raw map[string]any) *m
 	})
 }
 
-// deleteRows answers delete_rows: DELETE of the rows the where filter matches.
 func (s *Server) deleteRows(ctx context.Context, c *call, raw map[string]any) *mcp.CallToolResult {
 	var args deleteRowsArgs
 	if err := c.decode(raw, &args); err != nil {
@@ -193,16 +193,15 @@ func (s *Server) deleteRows(ctx context.Context, c *call, raw map[string]any) *m
 	})
 }
 
-// change runs one write tool's statement, which build writes after the
-// table's columns are read, with RETURNING of the returning columns. It
-// refuses and rolls back a write that changed more rows than write_rows,
-// counted as the larger of its command tag and what Postgres counted in
-// every table across the statement, so rows that a cascade or a trigger
-// changes count too. When the command tag alone stays within the cap, the
-// refusal says that the rows changed in other tables passed it. A write that
-// changed the system catalogs, which only a trigger can make it do, is
-// refused too. rowsAffected is the command tag, the rows of the table the
-// call names.
+// change runs the statement of a write tool, which build writes once the
+// table's columns are known, with RETURNING of the returning columns. It
+// refuses, and so rolls back, a write that changed more rows than
+// write_rows. The count is the larger of the command tag and what Postgres
+// counted in every table, so rows that cascades and triggers change count
+// too. When the command tag alone is within the cap, the refusal names the
+// other tables. A write that changed the system catalogs, which only a
+// trigger can cause, is refused too. rowsAffected is the command tag count,
+// the rows of the table the call names.
 func (c *call) change(ctx context.Context, t target, returning []string, advice string, build func(*statement, *tableColumns) error) *mcp.CallToolResult {
 	return c.run(ctx, func(tx *pg.Tx) (*mcp.CallToolResult, error) {
 		cols, err := c.columnsOf(ctx, tx, t.Schema, t.Table)
@@ -237,11 +236,11 @@ func (c *call) change(ctx context.Context, t target, returning []string, advice 
 			return nil, err
 		}
 		if after.catalog > before.catalog {
-			return nil, c.structureChanged(a.tag, "A trigger on the table changes structure, so ask an administrator to change it, or use execute_ddl.")
+			return nil, c.structureChanged(a.tag, "A trigger on the table changes structure. Ask an administrator to change the trigger, or use execute_ddl.")
 		}
 		changed := a.tag.RowsAffected()
 		if changed <= int64(c.s.cfg.Limits.WriteRows) {
-			advice = "The statement changes rows in other tables through triggers or cascades, so narrow the call"
+			advice = "Triggers or cascades change rows in other tables, so narrow the call"
 		}
 		if err := c.writeCap(max(changed, after.rows-before.rows), advice); err != nil {
 			return nil, err
@@ -249,7 +248,7 @@ func (c *call) change(ctx context.Context, t target, returning []string, advice 
 		verb := map[string]string{insertRowsName: "inserted", updateRowsName: "updated", deleteRowsName: "deleted"}[c.tool]
 		text := c.tool + " " + verb + " " + plural(changed, "row") + " of " + t.Schema + "." + t.Table + " on " + c.database + "."
 		if a.more {
-			text += " It answers the first " + plural(int64(len(a.rows)), "returned row") + ", because the answer stopped at the row or byte cap."
+			text += " More returned rows exist beyond the row or byte cap."
 		}
 		return writeAnswer(changed, a, text), nil
 	})

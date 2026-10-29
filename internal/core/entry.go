@@ -14,23 +14,23 @@ import (
 	"github.com/strazahq/adaptive-pg-mcp/internal/pg"
 )
 
-// builtinNames are the names of every built-in tool, whether free_sql serves it or not, which no catalog entry may take.
+// builtinNames are the names of every built-in tool, whether free_sql serves
+// it or not. No catalog tool may take one.
 var builtinNames = []string{
 	listDatabasesName, listSchemasName, listTablesName, describeTableName, readRowsName, aggregateName,
 	insertRowsName, updateRowsName, deleteRowsName, querySQLName, executeSQLName, executeDDLName,
 }
 
 // checkCatalog is the catalog part of the start checks of docs/DESIGN.md
-// section 6. It loads the catalog folder of server.yaml, reports each
-// statement that no index lists and each cap that an entry raises above
-// server.yaml, prepares and plans every indexed statement on each of
-// its databases through catalog.Check, reports each statement whose grants
-// the plan could not check, and serves the tool of each entry
-// that passes. A catalog that does not load refuses the start, and so do the
-// refusals of catalog.Check and an entry that Tool cannot turn into a tool.
-// ready holds the logins whose own checks ran. In mode standalone it then
-// reports each tool that an access.yaml entry lists and the server does not
-// serve, unless the catalog did not load, since its tool names are then unknown.
+// section 6. It loads the catalog folder that server.yaml names and reports
+// each statement that no tools.yaml lists and each cap a catalog tool raises.
+// catalog.Check then prepares and plans every listed statement on each of its
+// databases, and checkCatalog reports each statement whose grants the plan
+// could not check and serves each catalog tool that passes. ready holds the
+// logins whose own checks ran. A catalog that does not load refuses the
+// start, and so does each refusal of catalog.Check and each tool that Tool
+// cannot build. When the catalog loads, in standalone mode, it also reports
+// each tool that access.yaml lists and the server does not serve.
 func (s *Server) checkCatalog(ctx context.Context, ready map[pg.Login]bool) []Finding {
 	var findings []Finding
 	var names []string
@@ -64,11 +64,9 @@ func (s *Server) checkCatalog(ctx context.Context, ready map[pg.Login]bool) []Fi
 	return append(findings, s.unserved(names)...)
 }
 
-// addEntry serves the tool of a catalog entry whose parameter types
-// catalog.Check filled in, or returns the sentence of Tool that says why the
-// entry cannot be a tool. Its calls take the same path as the built-in
-// tools, on the entry's login and under the entry's limits over those of
-// server.yaml.
+// addEntry serves catalog tool e, whose parameter types catalog.Check filled
+// in, or returns the error of Tool. Its calls take the path of the built-in
+// tools, on the login e names and under its own caps where it sets them.
 func (s *Server) addEntry(e catalog.Entry) error {
 	tool, err := Tool(e)
 	if err != nil {
@@ -81,7 +79,8 @@ func (s *Server) addEntry(e catalog.Entry) error {
 	return nil
 }
 
-// entryLimits returns the limits of server.yaml with each field that the entry's own limits set replaced.
+// entryLimits returns the caps of server.yaml with each cap that own sets
+// replaced.
 func entryLimits(server config.Limits, own *catalog.Limits) config.Limits {
 	if own == nil {
 		return server
@@ -101,18 +100,17 @@ func entryLimits(server config.Limits, own *catalog.Limits) config.Limits {
 	return server
 }
 
-// raisedLimits reports each cap that the limits of entry e raise above
-// server, the limits of server.yaml, field by field. An entry may raise a
-// cap, and the report lets the operator see where a tool goes past the cap
-// of the built-in tools.
+// raisedLimits reports each cap that catalog tool e raises above server, the
+// caps of server.yaml, so the operator sees which tools go past the caps of
+// the built-in tools.
 func raisedLimits(server config.Limits, e catalog.Entry) []Finding {
 	if e.Limits == nil {
 		return nil
 	}
-	at := path.Join(path.Dir(e.Source), "tools.yaml") + " entry " + e.Name + " raises limits."
+	at := path.Join(path.Dir(e.Source), "tools.yaml") + ": the catalog tool " + e.Name + " raises limits."
 	var findings []Finding
 	raise := func(field, to, from string) {
-		findings = append(findings, Finding{Text: at + field + " to " + to + ", above the " + from + " that server.yaml sets, so its calls may go past the cap of the built-in tools. Lower it in the entry if that is not intended."})
+		findings = append(findings, Finding{Text: at + field + " to " + to + ", above the " + from + " in server.yaml. Lower it if that is not intended."})
 	}
 	if e.Limits.Rows > server.Rows {
 		raise("rows", count(int64(e.Limits.Rows)), count(int64(server.Rows)))
@@ -129,20 +127,21 @@ func raisedLimits(server config.Limits, e catalog.Entry) []Finding {
 	return findings
 }
 
-// narrowEntry is the advice of a catalog read that stopped at its row or byte cap.
+// narrowEntry is the advice for a catalog read that stopped at its row or
+// byte cap.
 func narrowEntry(tool string) string {
-	return "Narrow the call through its arguments, or ask an administrator to raise the limits of " + tool + " in the catalog."
+	return "Narrow the call through its arguments, or ask an administrator to raise the caps of " + tool + " in the catalog."
 }
 
-// entry answers a call of a catalog tool: the entry's statement with the
-// arguments as its bind parameters in $1 order, each sent as text that
-// Postgres reads as the parameter's type, and NULL for an optional parameter
-// the call leaves out. A read stops at its row or byte cap with truncated. A
-// write is refused and rolled back when it changes more rows than its
-// write_rows, counted as execute_sql counts them, or when it changes the
-// system catalogs, since a catalog tool changes rows only. The connection
-// closes after the call, because a statement that is not the server's own
-// can change the session that the pool would hand to the next call.
+// entry runs a call of catalog tool e: its statement with the arguments
+// bound in $1 order, each sent as text that Postgres reads as the
+// parameter's type, and NULL for an optional parameter the call leaves out.
+// A read stops at its row or byte cap with truncated set. A write is refused
+// and rolled back when it changes more rows than its write_rows cap, counted
+// as execute_sql counts them, or when it changes the system catalogs. The
+// connection closes after the call, because a statement that is not the
+// server's own can change session state that the pool would hand to the
+// next call.
 func (c *call) entry(ctx context.Context, e catalog.Entry, args map[string]any) *mcp.CallToolResult {
 	binds := make([]any, len(e.Params))
 	for i, p := range e.Params {
@@ -163,7 +162,7 @@ func (c *call) entry(ctx context.Context, e catalog.Entry, args map[string]any) 
 			if err != nil && !errors.Is(err, errCut) {
 				return nil, err
 			}
-			text := c.tool + " answered " + plural(int64(len(a.rows)), "row") + " from " + c.database + "."
+			text := c.tool + " returned " + plural(int64(len(a.rows)), "row") + " from " + c.database + "."
 			return readAnswer(a, text+c.stopped(a, c.limits.Rows, narrowEntry(c.tool))), err
 		}
 		before, err := c.changedCount(ctx, tx)
@@ -183,24 +182,24 @@ func (c *call) entry(ctx context.Context, e catalog.Entry, args map[string]any) 
 			return nil, err
 		}
 		if after.catalog > before.catalog {
-			return nil, c.structureChanged(a.tag, "A catalog tool may change rows only, so ask an administrator to change the statement in the catalog.")
+			return nil, c.structureChanged(a.tag, "A catalog tool may change rows only. Ask an administrator to change the statement.")
 		}
 		changed := max(tagChanged(a.tag), after.rows-before.rows)
 		if err := c.writeCap(changed, "Narrow the call through its arguments"); err != nil {
 			return nil, err
 		}
-		text := c.tool + " changed " + plural(changed, "row") + " on " + c.database + " and answered " + plural(int64(len(a.rows)), "row") + "."
+		text := c.tool + " changed " + plural(changed, "row") + " on " + c.database + " and returned " + plural(int64(len(a.rows)), "row") + "."
 		if a.more {
-			text += " The answer stopped at the row or byte cap, and more rows follow."
+			text += " The result stopped at the row or byte cap, and more rows follow."
 		}
 		return writeAnswer(changed, a, text), nil
 	})
 }
 
-// unserved reports, in mode standalone, each tool that a caller's entry in
-// access.yaml lists and the server does not serve, once per caller and
-// name, because such a name gives the caller nothing and is often a typing
-// mistake. catalogNames are the names of the catalog's entries.
+// unserved reports, in standalone mode, each tool that a caller in
+// access.yaml lists and the server does not serve, once per caller and name,
+// since such a name gives the caller nothing and is often a typo.
+// catalogNames are the names of the catalog tools.
 func (s *Server) unserved(catalogNames []string) []Finding {
 	if s.cfg.Mode != config.Standalone {
 		return nil
@@ -219,7 +218,8 @@ func (s *Server) unserved(catalogNames []string) []Finding {
 	return findings
 }
 
-// servesBuiltin reports whether name is a built-in tool that this server serves, as free_sql decides for the free SQL tools.
+// servesBuiltin reports whether name is a built-in tool this server serves.
+// For the free SQL tools, free_sql decides.
 func (s *Server) servesBuiltin(name string) bool {
 	switch name {
 	case querySQLName:
@@ -230,9 +230,10 @@ func (s *Server) servesBuiltin(name string) bool {
 	return slices.Contains(builtinNames, name)
 }
 
-// unservedText is the report about a tool that caller's entry lists and the server does not serve.
+// unservedText is the report for a tool that caller lists and the server
+// does not serve.
 func (s *Server) unservedText(caller, tool string) string {
-	lists := caller + " lists " + tool + " in its tools in access.yaml"
+	lists := caller + " lists " + tool + " in access.yaml"
 	serve := ""
 	switch tool {
 	case querySQLName:
@@ -241,7 +242,7 @@ func (s *Server) unservedText(caller, tool string) string {
 		serve = "read-write"
 	}
 	if serve != "" {
-		return lists + ", and free_sql " + string(s.cfg.FreeSQL) + " leaves " + tool + " out, so the entry gives it nothing. Set free_sql to " + serve + " to serve " + tool + ", or remove it from the tools of " + caller + "."
+		return lists + ", but free_sql is " + string(s.cfg.FreeSQL) + ", which does not serve it. Set free_sql to " + serve + ", or remove " + tool + " from the tools of " + caller + "."
 	}
-	return lists + ", and adaptive-pg-mcp serves no built-in tool or catalog tool of that name, so the entry gives it nothing. Correct the name, or remove it from the tools of " + caller + "."
+	return lists + ", but no built-in or catalog tool has that name. Correct the name, or remove it from the tools of " + caller + "."
 }

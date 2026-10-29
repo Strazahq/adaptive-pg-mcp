@@ -17,18 +17,23 @@ const (
 	endpointPath = "/mcp"
 	// maxRequestBody is the largest request body the server reads, in bytes.
 	maxRequestBody = 1 << 20
-	// readHeaderTimeout bounds how long a client may take to send its request headers.
+	// readHeaderTimeout bounds how long a client may take to send its request
+	// headers.
 	readHeaderTimeout = 10 * time.Second
-	// idleTimeout closes a keep-alive connection that carries no request for this long.
+	// idleTimeout closes a keep-alive connection that carries no request for
+	// this long.
 	idleTimeout = 2 * time.Minute
-	// sessionIdleTimeout closes a session of an older revision that sees no request for this long.
+	// sessionIdleTimeout closes a session of an older revision that sees no
+	// request for this long.
 	sessionIdleTimeout = 30 * time.Minute
-	// shutdownGrace is how long a stop waits for open requests before it closes their connections.
+	// shutdownGrace is how long a stop waits for open requests before it
+	// closes their connections.
 	shutdownGrace = 10 * time.Second
 )
 
-// originRefused answers a request that carries an Origin header.
-const originRefused = "the request comes from a web page, as its Origin header shows, and adaptive-pg-mcp serves no web page, so it refused the request. Call the server from an MCP client that sends no Origin header."
+// originRefused is the response body for a request that carries an Origin
+// header.
+const originRefused = "the request has an Origin header, so it comes from a web page, and web pages may not call this server. Use an MCP client that sends no Origin header."
 
 // Handler is the Streamable HTTP handler. Every request passes the Origin
 // check and then the token check, on every path and every revision, before
@@ -62,9 +67,9 @@ func (s *Server) Handler() http.Handler {
 }
 
 // refuseOffLoopback refuses plain HTTP on a listener that is not on a
-// loopback address, unless allow_plain_http: true accepts it. The load
-// accepts localhost by name, and the system resolves that name when the
-// listener binds, so only the bound address shows where plain HTTP would serve.
+// loopback address, unless allow_plain_http: true accepts it. The config
+// accepts localhost by name, which the system resolves when the listener
+// binds, so only the bound address shows where plain HTTP would serve.
 func (s *Server) refuseOffLoopback(ln net.Listener) error {
 	if s.cfg.TLS != nil || s.cfg.AllowPlainHTTP {
 		return nil
@@ -74,15 +79,15 @@ func (s *Server) refuseOffLoopback(ln net.Listener) error {
 		return nil
 	}
 	_, port, _ := net.SplitHostPort(s.cfg.Listen)
-	return fmt.Errorf("listen %s resolved to %s, which is not a loopback address, so without tls the bearer tokens of its callers could cross the network in cleartext, and adaptive-pg-mcp will not start. Make localhost resolve to 127.0.0.1, set listen to a loopback address such as %s, or add tls with cert_file and key_file.", s.cfg.Listen, ln.Addr(), net.JoinHostPort("127.0.0.1", port))
+	return fmt.Errorf("adaptive-pg-mcp will not start, because listen %s resolved to %s, not a loopback address, and without tls the tokens would cross the network in cleartext. Make localhost resolve to 127.0.0.1, set listen to %s, or set tls.cert_file and tls.key_file.", s.cfg.Listen, ln.Addr(), net.JoinHostPort("127.0.0.1", port))
 }
 
 // server returns the one MCP server for every HTTP request.
 func (s *Server) server(*http.Request) *mcp.Server { return s.mcp }
 
-// refuseOrigin answers 403 to any request that carries an Origin header. The
-// server serves no web page, so no page has an origin it may call from, and a
-// page that reaches it through DNS rebinding is turned away before the token check.
+// refuseOrigin responds 403 to any request that carries an Origin header.
+// The server serves no web page, so no origin may call it, and a page that
+// reaches it through DNS rebinding is turned away before the token check.
 func (s *Server) refuseOrigin(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if len(r.Header.Values("Origin")) > 0 {
@@ -94,12 +99,11 @@ func (s *Server) refuseOrigin(next http.Handler) http.Handler {
 	})
 }
 
-// Serve runs the start checks, and then serves Streamable HTTP on ln until
-// ctx ends and stops within shutdownGrace. With tls in server.yaml it serves
+// Serve runs the start checks, then serves Streamable HTTP on ln until ctx
+// ends, and stops within shutdownGrace. With tls in server.yaml it serves
 // HTTPS only, and reads the certificate and key again at most once per
-// certReload. When ln is not on a loopback address and plain HTTP would
-// serve there, or when a start check refuses, it closes ln without serving
-// and returns a sentence.
+// certReload. When plain HTTP would serve off loopback, or a start check
+// refuses, it closes ln without serving and returns an error.
 func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 	if err := s.refuseOffLoopback(ln); err != nil {
 		_ = ln.Close()
@@ -121,7 +125,7 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 		pair, fault := newKeyPair(*s.cfg.TLS, s.log, time.Now())
 		if fault != nil {
 			_ = ln.Close()
-			return errors.New(fault.refusal())
+			return errors.New("adaptive-pg-mcp will not start, because " + fault.refusal())
 		}
 		hs.TLSConfig = pair.tlsConfig()
 		scheme = "https://"
@@ -137,7 +141,7 @@ func (s *Server) Serve(ctx context.Context, ln net.Listener) error {
 	s.log.Info("serving Streamable HTTP", "address", scheme+ln.Addr().String()+endpointPath, "mode", string(s.cfg.Mode))
 	select {
 	case err := <-done:
-		return fmt.Errorf("adaptive-pg-mcp stopped serving HTTP on %s: %v. Check that the address is still the machine's, and start it again.", ln.Addr(), err)
+		return fmt.Errorf("adaptive-pg-mcp stopped serving HTTP on %s: %v. Check that the address still belongs to this machine, and start the server again.", ln.Addr(), err)
 	case <-ctx.Done():
 	}
 	stop, cancel := context.WithTimeout(context.Background(), shutdownGrace)

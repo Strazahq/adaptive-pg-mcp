@@ -1,5 +1,5 @@
-// Package config reads server.yaml and access.yaml, and refuses a file with an
-// unknown key, a missing required key or a value the server cannot use.
+// Package config loads server.yaml and access.yaml, and refuses unknown keys,
+// missing required keys and values it cannot use.
 package config
 
 import (
@@ -18,16 +18,18 @@ import (
 	"time"
 )
 
-// formatVersion is the only version of server.yaml and access.yaml this build reads.
+// formatVersion is the only version of server.yaml and access.yaml this
+// build reads.
 const formatVersion = 1
 
-// Mode says who decides which caller may use which tool on which database.
+// Mode says who authorizes each call.
 type Mode string
 
 const (
-	// Standalone reads its callers and their rights from access.yaml.
+	// Standalone authorizes callers from access.yaml.
 	Standalone Mode = "standalone"
-	// Straza accepts only the tokens the Straza gateway holds, and Straza decides per agent.
+	// Straza accepts only the tokens of the Straza gateway, which authorizes
+	// each agent.
 	Straza Mode = "straza"
 )
 
@@ -39,68 +41,75 @@ const (
 	FreeSQLOff FreeSQL = "off"
 	// FreeSQLRead offers query_sql, which runs in a read-only transaction.
 	FreeSQLRead FreeSQL = "read"
-	// FreeSQLReadWrite offers query_sql and execute_sql.
+	// FreeSQLReadWrite offers query_sql, execute_sql and execute_ddl.
 	FreeSQLReadWrite FreeSQL = "read-write"
 )
 
 // Stdio is the listen value that serves one client over stdin and stdout.
 const Stdio = "stdio"
 
-// Config is server.yaml after its checks, with the callers of access.yaml in mode standalone.
+// Config is a checked server.yaml, with the callers of access.yaml in
+// standalone mode.
 type Config struct {
 	// Mode is standalone or straza.
 	Mode Mode
 	// Listen is stdio, or the host and port that Streamable HTTP listens on.
 	Listen string
-	// TLS is the certificate and key that Streamable HTTP serves HTTPS with, or nil for plain HTTP.
+	// TLS is the certificate and key for HTTPS, or nil for plain HTTP.
 	TLS *TLS
-	// AllowPlainHTTP accepts plain HTTP on a listen address beyond this machine.
+	// AllowPlainHTTP permits plain HTTP on a listen address beyond this
+	// machine.
 	AllowPlainHTTP bool
 	// FreeSQL says which free SQL tools the server offers.
 	FreeSQL FreeSQL
-	// Limits are the caps of every call.
+	// Limits are the caps on every call.
 	Limits Limits
-	// GatewayTokens are the SHA-256 hashes of the tokens Straza holds, in mode straza only.
+	// GatewayTokens are the SHA-256 hashes of the Straza tokens, in straza
+	// mode only.
 	GatewayTokens []Hash
-	// Catalog is the catalog folder resolved against the folder of server.yaml, or empty for none.
+	// Catalog is the catalog folder, resolved against the folder of
+	// server.yaml, or empty for none.
 	Catalog string
-	// Databases are the databases by their config name.
+	// Databases maps config names to databases.
 	Databases map[string]Database
-	// Callers are the callers of access.yaml, in mode standalone only.
+	// Callers are the callers of access.yaml, in standalone mode only.
 	Callers []Caller
 }
 
-// TLS is the tls key: the files of the certificate and key that HTTPS serves.
+// TLS is the tls key. Both paths are resolved against the folder of
+// server.yaml.
 type TLS struct {
-	// CertFile is the PEM file of the server's certificate and any intermediate certificates, resolved against the folder of server.yaml.
+	// CertFile is the PEM file of the certificate and any intermediates.
 	CertFile string
-	// KeyFile is the PEM file of the certificate's private key, resolved against the folder of server.yaml.
+	// KeyFile is the PEM file of the certificate's private key.
 	KeyFile string
 }
 
-// Limits are the caps of every call.
+// Limits are the caps on every call.
 type Limits struct {
-	// Rows is the most rows a read answers.
+	// Rows is the most rows a read returns.
 	Rows int
-	// Bytes is the most bytes a read answers.
+	// Bytes is the most bytes a read returns.
 	Bytes int
 	// Timeout is the statement_timeout of each call.
 	Timeout time.Duration
-	// WriteRows is the most rows a write may change before it rolls back.
+	// WriteRows is the most rows a write may change. A write over it rolls
+	// back.
 	WriteRows int
 }
 
-// Database is one database and the logins the server connects to it with.
+// Database is one configured database and its logins.
 type Database struct {
-	// Logins are the logins by name. A single login appears as both read and write.
+	// Logins maps role names to logins. A single login appears as both
+	// read and write.
 	Logins map[string]Login
-	// AllowCrossDatabase accepts dblink or postgres_fdw on the database.
+	// AllowCrossDatabase permits dblink or postgres_fdw on the database.
 	AllowCrossDatabase bool
-	// AllowSuperuser accepts a superuser login while free SQL is on.
+	// AllowSuperuser permits a superuser login while free SQL is on.
 	AllowSuperuser bool
 }
 
-// Login is one real database login.
+// Login is one Postgres login.
 type Login struct {
 	// Env is the environment variable that holds the connection string.
 	Env string
@@ -117,15 +126,17 @@ type Caller struct {
 	Name string
 	// TokenSHA256 is the SHA-256 of the caller's token.
 	TokenSHA256 Hash
-	// Tools are the tool names the caller may use, as access.yaml gives them.
+	// Tools are the tool names the caller may use, as written.
 	Tools []string
 	// Databases are the config names of the databases the caller may use.
 	Databases []string
-	// Tables narrow the caller to these tables, as access.yaml gives them. Empty means no narrowing.
+	// Tables restricts the caller to these tables, as written. Empty means
+	// no restriction.
 	Tables []string
 }
 
-// rawServer is server.yaml as written. A nil field is a key the file does not set.
+// rawServer is server.yaml as written. A nil field is a key the file does
+// not set.
 type rawServer struct {
 	Version             *int                    `yaml:"version"`
 	Mode                *string                 `yaml:"mode"`
@@ -140,13 +151,11 @@ type rawServer struct {
 	Databases           map[string]*rawDatabase `yaml:"databases"`
 }
 
-// rawTLS is the tls key as written.
 type rawTLS struct {
 	CertFile *string `yaml:"cert_file"`
 	KeyFile  *string `yaml:"key_file"`
 }
 
-// rawLimits is the limits key as written.
 type rawLimits struct {
 	Rows      *int    `yaml:"rows"`
 	Bytes     *int    `yaml:"bytes"`
@@ -154,7 +163,6 @@ type rawLimits struct {
 	WriteRows *int    `yaml:"write_rows"`
 }
 
-// rawDatabase is one database as written.
 type rawDatabase struct {
 	Login              *rawLogin            `yaml:"login"`
 	Logins             map[string]*rawLogin `yaml:"logins"`
@@ -162,22 +170,21 @@ type rawDatabase struct {
 	AllowSuperuser     *bool                `yaml:"allow_superuser"`
 }
 
-// rawLogin is one login as written.
 type rawLogin struct {
 	DSNEnv *string `yaml:"dsn_env"`
 }
 
-// hashRule is the form of every configured token hash: SHA-256 in lowercase hex.
+// hashRule matches a SHA-256 in lowercase hex.
 var hashRule = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
-// envRule is the form of an environment variable name that dsn_env may hold.
+// envRule matches an environment variable name.
 var envRule = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
-// required is the reason every missing-key refusal gives.
-const required = "and only tls, allow_plain_http, allow_cross_database and allow_superuser may be left out"
+// required follows the key in every missing-key refusal.
+const required = "a required key"
 
-// Load reads server.yaml at path, and in mode standalone the access.yaml it
-// names, and checks every key. It reads each dsn_env variable with getenv.
+// Load reads and checks server.yaml at path and, in standalone mode, the
+// access.yaml it names. It reads each dsn_env variable with getenv.
 func Load(path string, getenv func(string) string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -202,19 +209,21 @@ func Load(path string, getenv func(string) string) (*Config, error) {
 	return cfg, nil
 }
 
-// missing reports a required key of server.yaml that is not set, with a hint at what to write.
+// missing refuses an unset required key of server.yaml, with hint saying
+// what to add.
 func missing(path, key, hint string) error {
 	return fmt.Errorf("%s does not set %s, %s. %s", path, key, required, hint)
 }
 
-// check turns server.yaml as written into a Config, and returns the path of access.yaml in mode standalone.
+// check turns server.yaml as written into a Config, and returns the path of
+// access.yaml in standalone mode.
 func check(path string, raw *rawServer) (*Config, string, error) {
 	cfg := &Config{}
 	switch {
 	case unset(raw.Mode):
 		return nil, "", missing(path, "mode", "Add mode: standalone, or mode: straza behind the Straza gateway.")
 	case *raw.Mode != string(Standalone) && *raw.Mode != string(Straza):
-		return nil, "", fmt.Errorf("%s has mode %s, which is neither standalone nor straza. Set mode to standalone, or to straza behind the Straza gateway.", path, *raw.Mode)
+		return nil, "", fmt.Errorf("%s has mode %s. Set mode to standalone, or to straza behind the Straza gateway.", path, *raw.Mode)
 	}
 	cfg.Mode = Mode(*raw.Mode)
 
@@ -222,10 +231,10 @@ func check(path string, raw *rawServer) (*Config, string, error) {
 		return nil, "", missing(path, "listen", "Add listen: stdio, or an address such as 127.0.0.1:8080.")
 	}
 	if host, _, err := net.SplitHostPort(*raw.Listen); err == nil && host == "" {
-		return nil, "", fmt.Errorf("%s has listen %s, which names a port and no host, so it would serve on every network interface. Set listen to 127.0.0.1%s to serve this machine only, or name the address to serve on.", path, *raw.Listen, *raw.Listen)
+		return nil, "", fmt.Errorf("%s has listen %s, which has no host and would serve on every interface. Set listen to 127.0.0.1%s for this machine only, or name an address.", path, *raw.Listen, *raw.Listen)
 	}
 	if *raw.Listen != Stdio && !hostPort(*raw.Listen) {
-		return nil, "", fmt.Errorf("%s has listen %s, which is neither stdio nor a host and port. Set listen to stdio, or to an address such as 127.0.0.1:8080.", path, *raw.Listen)
+		return nil, "", fmt.Errorf("%s has listen %s. Set listen to stdio, or to a host and port such as 127.0.0.1:8080.", path, *raw.Listen)
 	}
 	cfg.Listen = *raw.Listen
 	if err := checkTransport(path, raw, cfg); err != nil {
@@ -236,7 +245,7 @@ func check(path string, raw *rawServer) (*Config, string, error) {
 	case unset(raw.FreeSQL):
 		return nil, "", missing(path, "free_sql", "Add free_sql: off, read or read-write.")
 	case !slices.Contains([]FreeSQL{FreeSQLOff, FreeSQLRead, FreeSQLReadWrite}, FreeSQL(*raw.FreeSQL)):
-		return nil, "", fmt.Errorf("%s has free_sql %s, which is not off, read or read-write. Set free_sql to one of them.", path, *raw.FreeSQL)
+		return nil, "", fmt.Errorf("%s has free_sql %s. Set free_sql to off, read or read-write.", path, *raw.FreeSQL)
 	}
 	cfg.FreeSQL = FreeSQL(*raw.FreeSQL)
 
@@ -247,7 +256,7 @@ func check(path string, raw *rawServer) (*Config, string, error) {
 	cfg.Limits = limits
 
 	if unset(raw.Catalog) {
-		return nil, "", missing(path, "catalog", "Add catalog: the folder of the catalog, or none.")
+		return nil, "", missing(path, "catalog", "Add catalog: the catalog folder, or none.")
 	}
 	if *raw.Catalog != "none" {
 		cfg.Catalog = besides(path, *raw.Catalog)
@@ -272,7 +281,7 @@ func check(path string, raw *rawServer) (*Config, string, error) {
 	return cfg, accessPath, nil
 }
 
-// checkLimits checks the limits key and every key under it.
+// checkLimits checks the limits key and the keys under it.
 func checkLimits(path string, raw *rawLimits) (Limits, error) {
 	if raw == nil {
 		return Limits{}, missing(path, "limits", "Add limits with rows, bytes, timeout and write_rows.")
@@ -283,8 +292,8 @@ func checkLimits(path string, raw *rawLimits) (Limits, error) {
 		what string
 		eg   string
 	}{
-		{"limits.rows", raw.Rows, "the most rows a read answers", "1000"},
-		{"limits.bytes", raw.Bytes, "the most bytes a read answers", "1048576"},
+		{"limits.rows", raw.Rows, "the most rows a read returns", "1000"},
+		{"limits.bytes", raw.Bytes, "the most bytes a read returns", "1048576"},
 		{"limits.write_rows", raw.WriteRows, "the most rows a write may change", "100"},
 	}
 	for _, c := range counts {
@@ -292,7 +301,7 @@ func checkLimits(path string, raw *rawLimits) (Limits, error) {
 			return Limits{}, missing(path, c.key, fmt.Sprintf("Add %s, %s, such as %s.", c.key, c.what, c.eg))
 		}
 		if *c.v < 1 {
-			return Limits{}, fmt.Errorf("%s has %s %d, and it must be 1 or more. Set %s to %s, such as %s.", path, c.key, *c.v, c.key, c.what, c.eg)
+			return Limits{}, fmt.Errorf("%s has %s %d, and it must be at least 1. Set %s to %s, such as %s.", path, c.key, *c.v, c.key, c.what, c.eg)
 		}
 	}
 	if unset(raw.Timeout) {
@@ -303,71 +312,70 @@ func checkLimits(path string, raw *rawLimits) (Limits, error) {
 		return Limits{}, fmt.Errorf("%s has limits.timeout %s, which is not a duration. Write it with a unit, such as 30s.", path, *raw.Timeout)
 	}
 	if timeout <= 0 {
-		return Limits{}, fmt.Errorf("%s has limits.timeout %s, and it must be longer than zero. Set it to the statement timeout of each call, such as 30s.", path, *raw.Timeout)
+		return Limits{}, fmt.Errorf("%s has limits.timeout %s. Set it above zero, such as 30s.", path, *raw.Timeout)
 	}
 	return Limits{Rows: *raw.Rows, Bytes: *raw.Bytes, Timeout: timeout, WriteRows: *raw.WriteRows}, nil
 }
 
-// checkMode applies the keys that belong to one mode: access in standalone,
-// gateway_tokens_sha256 in straza. It returns the resolved path of access.yaml.
+// checkMode checks the keys of one mode: access in standalone mode,
+// gateway_tokens_sha256 in straza mode. It returns the resolved path of
+// access.yaml.
 func checkMode(path string, raw *rawServer, cfg *Config) (string, error) {
 	if cfg.Mode == Standalone {
 		if raw.GatewayTokensSHA256 != nil {
-			return "", fmt.Errorf("%s sets gateway_tokens_sha256 in mode standalone, where access.yaml names the callers. Remove gateway_tokens_sha256, or set mode: straza.", path)
+			return "", fmt.Errorf("%s sets gateway_tokens_sha256 in standalone mode, where access.yaml names the callers. Remove it, or set mode: straza.", path)
 		}
 		if unset(raw.Access) {
-			return "", fmt.Errorf("%s does not set access, which mode standalone needs to know its callers. Add access: the path to access.yaml.", path)
+			return "", fmt.Errorf("%s does not set access, which standalone mode needs. Add access: the path to access.yaml.", path)
 		}
 		return besides(path, *raw.Access), nil
 	}
 	if raw.Access != nil {
-		return "", fmt.Errorf("%s sets access in mode straza, where Straza decides who may call. Remove access, or set mode: standalone.", path)
+		return "", fmt.Errorf("%s sets access in straza mode, where Straza authorizes callers. Remove it, or set mode: standalone.", path)
 	}
 	if len(raw.GatewayTokensSHA256) == 0 {
-		return "", fmt.Errorf("%s does not set gateway_tokens_sha256, which mode straza needs to check the tokens Straza holds. Add the SHA-256 of each Straza token in lowercase hex, as adaptive-pg-mcp token prints it.", path)
+		return "", fmt.Errorf("%s does not set gateway_tokens_sha256, which straza mode needs. Add the token_sha256 that adaptive-pg-mcp token prints for each Straza token.", path)
 	}
 	for i, h := range raw.GatewayTokensSHA256 {
 		hash, ok := parseHash(h)
 		if !ok {
-			return "", fmt.Errorf("%s has entry %d of gateway_tokens_sha256 that is not 64 lowercase hexadecimal characters. Write each hash as adaptive-pg-mcp token prints it.", path, i+1)
+			return "", fmt.Errorf("%s has item %d of gateway_tokens_sha256 that is not 64 lowercase hex characters. Copy each hash as adaptive-pg-mcp token prints it.", path, i+1)
 		}
 		cfg.GatewayTokens = append(cfg.GatewayTokens, hash)
 	}
 	return "", nil
 }
 
-// checkTransport applies tls, which serves HTTPS, and allow_plain_http,
-// which accepts plain HTTP on an address beyond this machine. It refuses
-// either key where it does nothing or where they contradict, and plain HTTP
-// beyond this machine that allow_plain_http: true does not accept, because
-// the bearer tokens would cross the network in cleartext.
+// checkTransport checks tls and allow_plain_http. It refuses either key with
+// listen stdio, both keys together, and plain HTTP beyond this machine
+// without allow_plain_http: true, because bearer tokens would cross the
+// network in cleartext.
 func checkTransport(path string, raw *rawServer, cfg *Config) error {
 	plain := raw.AllowPlainHTTP != nil && *raw.AllowPlainHTTP
 	switch {
 	case cfg.Listen == Stdio && raw.TLS != nil:
-		return fmt.Errorf("%s sets tls with listen stdio, where no network connection carries the calls. Remove tls, or set listen to the address to serve HTTPS on.", path)
+		return fmt.Errorf("%s sets tls, but listen is stdio. Remove tls, or set listen to the address to serve HTTPS on.", path)
 	case cfg.Listen == Stdio && plain:
-		return fmt.Errorf("%s sets allow_plain_http: true with listen stdio, where no HTTP is served. Remove allow_plain_http, or set listen to the address to serve HTTP on.", path)
+		return fmt.Errorf("%s sets allow_plain_http: true, but listen is stdio. Remove allow_plain_http, or set listen to the address to serve HTTP on.", path)
 	case raw.TLS != nil && plain:
-		return fmt.Errorf("%s sets both tls and allow_plain_http: true, which contradict each other, because with tls adaptive-pg-mcp serves HTTPS only. Remove allow_plain_http to serve HTTPS, or remove tls to serve plain HTTP.", path)
+		return fmt.Errorf("%s sets both tls and allow_plain_http: true, but tls serves HTTPS only. Remove allow_plain_http to serve HTTPS, or tls to serve plain HTTP.", path)
 	case raw.TLS != nil && unset(raw.TLS.CertFile):
-		return fmt.Errorf("%s sets tls without cert_file, and tls needs both cert_file and key_file. Add tls.cert_file: the path to the PEM file of the server's certificate.", path)
+		return fmt.Errorf("%s sets tls without cert_file. Add tls.cert_file: the path to the PEM file of the certificate.", path)
 	case raw.TLS != nil && unset(raw.TLS.KeyFile):
-		return fmt.Errorf("%s sets tls without key_file, and tls needs both cert_file and key_file. Add tls.key_file: the path to the PEM file of the certificate's private key.", path)
+		return fmt.Errorf("%s sets tls without key_file. Add tls.key_file: the path to the PEM file of the private key.", path)
 	case raw.TLS != nil:
 		cfg.TLS = &TLS{CertFile: besides(path, *raw.TLS.CertFile), KeyFile: besides(path, *raw.TLS.KeyFile)}
 	case cfg.Listen != Stdio && !plain && !OnThisMachine(cfg.Listen):
 		_, port, _ := net.SplitHostPort(cfg.Listen)
-		return fmt.Errorf("%s has listen %s, which is not localhost or a loopback address, so without tls the bearer tokens of its callers would cross the network in cleartext. Add tls with cert_file and key_file, set listen to a loopback address such as %s, or set allow_plain_http: true if something in front of the server encrypts the traffic, such as a service mesh.", path, cfg.Listen, net.JoinHostPort("127.0.0.1", port))
+		return fmt.Errorf("%s has listen %s without tls, so bearer tokens would cross the network in cleartext. Add tls, set listen to %s, or set allow_plain_http: true if a proxy or service mesh encrypts the traffic.", path, cfg.Listen, net.JoinHostPort("127.0.0.1", port))
 	}
 	cfg.AllowPlainHTTP = plain
 	return nil
 }
 
-// OnThisMachine reports whether the listen address listen serves this
-// machine only: its host is localhost or a loopback IP address, such as
-// 127.0.0.1 or ::1. Any other host name counts as beyond this machine,
-// because the load does not resolve names.
+// OnThisMachine reports whether the host of listen is localhost or a
+// loopback IP address, such as 127.0.0.1 or ::1. It does not resolve names,
+// so any other host name counts as beyond this machine.
 func OnThisMachine(listen string) bool {
 	host, _, err := net.SplitHostPort(listen)
 	if err != nil {
@@ -380,10 +388,10 @@ func OnThisMachine(listen string) bool {
 // checkDatabase checks one database and its login or logins.
 func checkDatabase(path, name string, raw *rawDatabase) (Database, error) {
 	if raw == nil || (raw.Login == nil && raw.Logins == nil) {
-		return Database{}, fmt.Errorf("%s database %s sets neither login nor logins, so adaptive-pg-mcp has no login to connect with. Add login with dsn_env, or logins with read and write.", path, name)
+		return Database{}, fmt.Errorf("%s database %s sets neither login nor logins. Add login with dsn_env, or logins with read and write.", path, name)
 	}
 	if raw.Login != nil && raw.Logins != nil {
-		return Database{}, fmt.Errorf("%s database %s sets both login and logins. Keep login for one login that reads and writes, or logins with read and write.", path, name)
+		return Database{}, fmt.Errorf("%s database %s sets both login and logins. Keep login for a single login, or logins with read and write.", path, name)
 	}
 	db := Database{
 		Logins:             map[string]Login{},
@@ -400,7 +408,7 @@ func checkDatabase(path, name string, raw *rawDatabase) (Database, error) {
 	}
 	for _, role := range []string{"read", "write"} {
 		if _, ok := raw.Logins[role]; !ok {
-			return Database{}, fmt.Errorf("%s database %s has logins without %s, and logins needs both read and write. Add logins.%s with dsn_env, or use login for one login that reads and writes.", path, name, role, role)
+			return Database{}, fmt.Errorf("%s database %s has logins without %s. Add logins.%s with dsn_env, or use login for a single login.", path, name, role, role)
 		}
 	}
 	for _, role := range slices.Sorted(maps.Keys(raw.Logins)) {
@@ -413,18 +421,20 @@ func checkDatabase(path, name string, raw *rawDatabase) (Database, error) {
 	return db, nil
 }
 
-// checkEnv checks the dsn_env of one login. role is empty for the single login of a database.
+// checkEnv checks the dsn_env of one login. role is empty for the single
+// login of a database.
 func checkEnv(path, db, role string, raw *rawLogin) (string, error) {
 	if raw == nil || unset(raw.DSNEnv) {
-		return "", fmt.Errorf("%s does not set dsn_env for %s, so adaptive-pg-mcp cannot find its connection string. Add dsn_env: the name of the environment variable that holds it.", path, loginName(db, role))
+		return "", fmt.Errorf("%s does not set dsn_env for %s. Add dsn_env: the name of the environment variable that holds its connection string.", path, loginName(db, role))
 	}
 	if !envRule.MatchString(*raw.DSNEnv) {
-		return "", fmt.Errorf("%s has a dsn_env for %s that is not an environment variable name. Put the connection string in an environment variable, and set dsn_env to the variable's name, such as %s.", path, loginName(db, role), exampleEnv(db, role))
+		return "", fmt.Errorf("%s has a dsn_env for %s that is not an environment variable name. Put the connection string in a variable, and set dsn_env to its name, such as %s.", path, loginName(db, role), exampleEnv(db, role))
 	}
 	return *raw.DSNEnv, nil
 }
 
-// readLogins reads the connection string of every login from its environment variable.
+// readLogins reads the connection string of every login from its
+// environment variable.
 func readLogins(cfg *Config, getenv func(string) string) error {
 	for _, name := range slices.Sorted(maps.Keys(cfg.Databases)) {
 		db := cfg.Databases[name]
@@ -437,7 +447,7 @@ func readLogins(cfg *Config, getenv func(string) string) error {
 			}
 			v := getenv(l.Env)
 			if v == "" {
-				return fmt.Errorf("the environment variable %s, which server.yaml names for %s, is not set or is empty, so adaptive-pg-mcp cannot connect to %s. Set it to the connection string of that login.", l.Env, label, name)
+				return fmt.Errorf("the environment variable %s for %s is unset or empty. Set it to a connection string for %s.", l.Env, label, name)
 			}
 			l.DSN = DSN{value: &v}
 			db.Logins[role] = l
@@ -446,7 +456,8 @@ func readLogins(cfg *Config, getenv func(string) string) error {
 	return nil
 }
 
-// loginName names a login in a sentence, such as the login of sales_eu or the read login of helpdesk.
+// loginName names a login in a sentence, such as the login of sales_eu or
+// the read login of helpdesk.
 func loginName(db, role string) string {
 	if role == "" {
 		return "the login of " + db
@@ -454,7 +465,8 @@ func loginName(db, role string) string {
 	return "the " + role + " login of " + db
 }
 
-// exampleEnv suggests an environment variable name for a login, such as HELPDESK_READ_DSN.
+// exampleEnv suggests an environment variable name for a login, such as
+// HELPDESK_READ_DSN.
 func exampleEnv(db, role string) string {
 	s := db
 	if role != "" {
@@ -476,7 +488,8 @@ func exampleEnv(db, role string) string {
 // unset reports whether a string key is missing or empty.
 func unset(s *string) bool { return s == nil || *s == "" }
 
-// hostPort reports whether s is a host and a numeric port, such as 127.0.0.1:8080.
+// hostPort reports whether s is a host and a numeric port, such as
+// 127.0.0.1:8080.
 func hostPort(s string) bool {
 	_, port, err := net.SplitHostPort(s)
 	if err != nil {
@@ -486,7 +499,8 @@ func hostPort(s string) bool {
 	return err == nil && n >= 0 && n <= 65535
 }
 
-// besides resolves p against the folder of the file at path, unless p is absolute.
+// besides resolves p against the folder of the file at path, unless p is
+// absolute.
 func besides(path, p string) string {
 	if filepath.IsAbs(p) {
 		return p
@@ -504,16 +518,19 @@ func parseHash(s string) (Hash, bool) {
 	return h, err == nil
 }
 
-// DSN is a connection string read from the environment, which prints as a placeholder under every fmt verb.
+// DSN is a connection string from the environment. It prints as a
+// placeholder under every fmt verb.
 type DSN struct {
-	// value points at the connection string, so that a reflective print of a struct holding a DSN shows only an address.
+	// value is a pointer, so a reflective print of a struct that holds a DSN
+	// shows only an address.
 	value *string
 }
 
 // hiddenDSN is what a DSN prints as.
 const hiddenDSN = "[connection string hidden]"
 
-// Reveal returns the connection string, for the one place that connects with it.
+// Reveal returns the connection string. Only the code that connects calls
+// it.
 func (d DSN) Reveal() string {
 	if d.value == nil {
 		return ""
@@ -527,5 +544,6 @@ func (DSN) String() string { return hiddenDSN }
 // GoString returns the placeholder for %#v, never the connection string.
 func (DSN) GoString() string { return hiddenDSN }
 
-// Format writes the placeholder for every fmt verb, never the connection string.
+// Format writes the placeholder for every fmt verb, never the connection
+// string.
 func (DSN) Format(f fmt.State, _ rune) { _, _ = io.WriteString(f, hiddenDSN) }

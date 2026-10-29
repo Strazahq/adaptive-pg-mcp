@@ -62,8 +62,8 @@ func environment() map[string]string {
 	}
 }
 
-// at walks a dotted path through nested maps and returns the map holding the last key.
-// A number in the path picks an item of a list.
+// at walks a dotted path through nested maps and returns the map that holds
+// the last key. A number in the path picks an item of a list.
 func at(doc map[string]any, path string) (map[string]any, string) {
 	parts := strings.Split(path, ".")
 	var cur any = doc
@@ -104,7 +104,7 @@ func marshal(t *testing.T, server, access map[string]any, env map[string]string)
 }
 
 // load writes the files into a fresh folder and runs Load on them. It returns
-// the folder, which every expected sentence names as $DIR.
+// the folder, which every expected refusal names as $DIR.
 func load(t *testing.T, f files) (*Config, string, error) {
 	t.Helper()
 	dir := t.TempDir()

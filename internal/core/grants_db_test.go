@@ -61,22 +61,22 @@ var grantCases = []grantCase{
 		sql: "SELECT id, status FROM tickets WHERE status = $1 ORDER BY id"},
 	{name: "ledger_total", mode: "read", login: "read",
 		sql:  "SELECT sum(amount) AS total FROM ledger",
-		want: refuses("helpdesk/tickets.sql statement ledger_total needs a grant that the read login of helpdesk lacks: the server answered: permission denied for table ledger (SQLSTATE 42501). Grant the login what the statement needs, or remove helpdesk from its databases.")},
+		want: refuses("helpdesk/tickets.sql statement ledger_total needs a grant that the read login of helpdesk lacks: Postgres said: permission denied for table ledger (SQLSTATE 42501). Grant it, or remove helpdesk from its databases.")},
 	{name: "ticket_notes", mode: "read", login: "read",
 		sql:  "SELECT id, note FROM tickets ORDER BY id",
-		want: refuses("helpdesk/tickets.sql statement ticket_notes needs a grant that the read login of helpdesk lacks: the server answered: permission denied for table tickets (SQLSTATE 42501). Grant the login what the statement needs, or remove helpdesk from its databases.")},
+		want: refuses("helpdesk/tickets.sql statement ticket_notes needs a grant that the read login of helpdesk lacks: Postgres said: permission denied for table tickets (SQLSTATE 42501). Grant it, or remove helpdesk from its databases.")},
 	{name: "ticket_scores", mode: "read", login: "read",
 		sql:  "SELECT id, secret_score(id) AS score FROM tickets ORDER BY id",
-		want: refuses("helpdesk/tickets.sql statement ticket_scores needs a grant that the read login of helpdesk lacks: the server answered: permission denied for function secret_score (SQLSTATE 42501). Grant the login what the statement needs, or remove helpdesk from its databases.")},
+		want: refuses("helpdesk/tickets.sql statement ticket_scores needs a grant that the read login of helpdesk lacks: Postgres said: permission denied for function secret_score (SQLSTATE 42501). Grant it, or remove helpdesk from its databases.")},
 	{name: "open_ticket", mode: "write", login: "write", params: []string{"id"},
 		sql:  "INSERT INTO tickets (id) VALUES ($1)",
-		want: refuses("helpdesk/tickets.sql statement open_ticket needs a grant that the write login of helpdesk lacks: the server answered: permission denied for table tickets (SQLSTATE 42501). Grant the login what the statement needs, or remove helpdesk from its databases.")},
+		want: refuses("helpdesk/tickets.sql statement open_ticket needs a grant that the write login of helpdesk lacks: Postgres said: permission denied for table tickets (SQLSTATE 42501). Grant it, or remove helpdesk from its databases.")},
 	{name: "close_tickets", mode: "write", login: "write", params: []string{"up_to"},
 		sql:  "UPDATE tickets SET status = 'closed' WHERE id <= $1",
-		want: refuses("helpdesk/tickets.sql statement close_tickets needs a grant that the write login of helpdesk lacks: the server answered: permission denied for table tickets (SQLSTATE 42501). Grant the login what the statement needs, or remove helpdesk from its databases.")},
+		want: refuses("helpdesk/tickets.sql statement close_tickets needs a grant that the write login of helpdesk lacks: Postgres said: permission denied for table tickets (SQLSTATE 42501). Grant it, or remove helpdesk from its databases.")},
 	{name: "drop_ticket", mode: "write", login: "write", params: []string{"id"},
 		sql:  "DELETE FROM tickets WHERE id = $1",
-		want: refuses("helpdesk/tickets.sql statement drop_ticket needs a grant that the write login of helpdesk lacks: the server answered: permission denied for table tickets (SQLSTATE 42501). Grant the login what the statement needs, or remove helpdesk from its databases.")},
+		want: refuses("helpdesk/tickets.sql statement drop_ticket needs a grant that the write login of helpdesk lacks: Postgres said: permission denied for table tickets (SQLSTATE 42501). Grant it, or remove helpdesk from its databases.")},
 	{name: "add_note", mode: "write", login: "write", params: []string{"id", "body"},
 		sql: "INSERT INTO notes (id, body) VALUES ($1, $2)"},
 	{name: "edit_note", mode: "write", login: "write", params: []string{"id", "body"},
@@ -87,10 +87,10 @@ var grantCases = []grantCase{
 		sql: "MERGE INTO notes USING (SELECT $1::int4 AS id, $2::text AS body) s ON notes.id = s.id WHEN MATCHED THEN UPDATE SET body = s.body WHEN NOT MATCHED THEN INSERT VALUES (s.id, s.body)"},
 	{name: "close_month", mode: "write", login: "write", params: []string{"month"},
 		sql:  "CALL close_month($1)",
-		want: reports("helpdesk/tickets.sql statement close_month is a statement that EXPLAIN cannot plan, so the start checks cannot check its grants. The tool is served, and a grant that the write login of helpdesk lacks shows on its first call. Make sure the login holds what the statement needs.")},
+		want: reports("helpdesk/tickets.sql statement close_month cannot be planned by EXPLAIN, so its grants are not checked. The tool is served, and its first call fails if the write login of helpdesk lacks a grant. Check its grants by hand.")},
 	{name: "tickets_after", mode: "read", login: "read", params: []string{"after"},
 		sql:  "SELECT id FROM tickets WHERE id > must_be_set($1) ORDER BY id",
-		want: reports("helpdesk/tickets.sql statement tickets_after does not plan on helpdesk with NULL for each parameter: the server answered: the id must be set (SQLSTATE P0001). The tool is served, and a grant that the read login of helpdesk lacks shows on its first call. Fix the statement if its calls fail the same way.")},
+		want: reports("helpdesk/tickets.sql statement tickets_after does not plan on helpdesk with NULL parameters: Postgres said: the id must be set (SQLSTATE P0001). The tool is served, and its first call fails if the read login of helpdesk lacks a grant. Fix the statement if real calls fail the same way.")},
 	{name: "locked_tickets", mode: "read", login: "read",
 		sql: "SELECT id FROM tickets WHERE id = hold_lock(1)"},
 	{name: "notified_tickets", mode: "read", login: "read",
@@ -111,7 +111,7 @@ func grantsCatalog(t *testing.T, major int) string {
 			continue
 		}
 		sql.WriteString("-- name: " + c.name + "\n" + c.sql + "\n\n")
-		index.WriteString("  " + c.name + ":\n    description: Runs the grant check case " + c.name + ". Answers its rows.\n    mode: " + c.mode + "\n    databases: [helpdesk]\n    login: " + c.login + "\n")
+		index.WriteString("  " + c.name + ":\n    description: Runs the grant check case " + c.name + ". Returns its rows.\n    mode: " + c.mode + "\n    databases: [helpdesk]\n    login: " + c.login + "\n")
 		if len(c.params) > 0 {
 			index.WriteString("    params:\n")
 		}
@@ -211,9 +211,9 @@ func TestCatalogGrantChecks(t *testing.T) {
 				want       string
 			}{
 				{"USAGE on a sequence that a column default calls", "add_serial", map[string]any{"v": 1},
-					"add_serial on helpdesk failed, because the server answered: permission denied for sequence serials_id_seq (SQLSTATE 42501), so nothing was changed. Correct the call as the reason says, and call it again."},
+					"add_serial on helpdesk changed nothing, because Postgres said: permission denied for sequence serials_id_seq (SQLSTATE 42501). Correct the call and try again."},
 				{"EXECUTE on a STRICT function that a NULL parameter folds away", "score_of", map[string]any{"id": 3},
-					"score_of on helpdesk failed, because the server answered: permission denied for function secret_score (SQLSTATE 42501), so nothing was read. Correct the call as the reason says, and call it again."},
+					"score_of on helpdesk failed, because Postgres said: permission denied for function secret_score (SQLSTATE 42501). Correct the call and try again."},
 			}
 			for _, c := range firstCalls {
 				t.Run("a grant the plan does not show: "+c.name, func(t *testing.T) {
@@ -239,13 +239,13 @@ func TestCatalogPlanThatEnds(t *testing.T) {
 		want     string
 	}{
 		{name: "a backend terminated while it plans", entry: "ticket_count", sql: "SELECT count(*) AS n FROM tickets WHERE id > end_session(0)",
-			want: "helpdesk/tickets.sql statement ticket_count could not be planned on helpdesk: the server answered: terminating connection due to administrator command (SQLSTATE 57P01). Without the plan the start checks cannot check the grants of the read login of helpdesk, so adaptive-pg-mcp will not start. Fix what the reason names, such as a lock or a slow function that holds up the plan or a server that drops the connection, and start again."},
+			want: "helpdesk/tickets.sql statement ticket_count could not be planned on helpdesk: Postgres said: terminating connection due to administrator command (SQLSTATE 57P01). The grants of the read login of helpdesk cannot be checked without a plan. Fix the cause, and try again."},
 		{name: "a check cancelled while it plans", entry: "slow_count", sql: "SELECT count(*) AS n FROM tickets WHERE id > slow_plan(0)", cancel: true,
-			want: "helpdesk/tickets.sql statement slow_count could not be planned on helpdesk: the call was cancelled before the server answered. Without the plan the start checks cannot check the grants of the read login of helpdesk, so adaptive-pg-mcp will not start. Fix what the reason names, such as a lock or a slow function that holds up the plan or a server that drops the connection, and start again."},
+			want: "helpdesk/tickets.sql statement slow_count could not be planned on helpdesk: the call was cancelled before Postgres replied. The grants of the read login of helpdesk cannot be checked without a plan. Fix the cause, and try again."},
 		{name: "a plan past its statement timeout", entry: "timed_count", sql: "SELECT count(*) AS n FROM tickets WHERE id > slow_plan(0)", timeout: "1s",
-			want: "helpdesk/tickets.sql statement timed_count could not be planned on helpdesk: the server answered: canceling statement due to statement timeout (SQLSTATE 57014). Without the plan the start checks cannot check the grants of the read login of helpdesk, so adaptive-pg-mcp will not start. Fix what the reason names, such as a lock or a slow function that holds up the plan or a server that drops the connection, and start again."},
+			want: "helpdesk/tickets.sql statement timed_count could not be planned on helpdesk: Postgres said: canceling statement due to statement timeout (SQLSTATE 57014). The grants of the read login of helpdesk cannot be checked without a plan. Fix the cause, and try again."},
 		{name: "a plan that waits for a lock on an index", entry: "ticket_one", sql: "SELECT id FROM tickets WHERE id = 1", timeout: "1s", holdOpen: "REINDEX INDEX tickets_pkey",
-			want: "helpdesk/tickets.sql statement ticket_one could not be planned on helpdesk: the server answered: canceling statement due to statement timeout (SQLSTATE 57014). Without the plan the start checks cannot check the grants of the read login of helpdesk, so adaptive-pg-mcp will not start. Fix what the reason names, such as a lock or a slow function that holds up the plan or a server that drops the connection, and start again."},
+			want: "helpdesk/tickets.sql statement ticket_one could not be planned on helpdesk: Postgres said: canceling statement due to statement timeout (SQLSTATE 57014). The grants of the read login of helpdesk cannot be checked without a plan. Fix the cause, and try again."},
 	}
 	for _, s := range pgtest.Servers(t) {
 		t.Run(s.String(), func(t *testing.T) {
@@ -259,7 +259,7 @@ func TestCatalogPlanThatEnds(t *testing.T) {
 						"GRANT SELECT ON tickets TO {login}")
 					files := map[string]string{
 						"helpdesk/tickets.sql": "-- name: " + c.entry + "\n" + c.sql + "\n",
-						"helpdesk/tools.yaml":  "version: 1\ntools:\n  " + c.entry + ":\n    description: Counts the tickets. Answers one row.\n    mode: read\n    databases: [helpdesk]\n    login: read\n",
+						"helpdesk/tools.yaml":  "version: 1\ntools:\n  " + c.entry + ":\n    description: Counts the tickets. Returns one row.\n    mode: read\n    databases: [helpdesk]\n    login: read\n",
 					}
 					head := strazaHead("off")
 					if c.timeout != "" {

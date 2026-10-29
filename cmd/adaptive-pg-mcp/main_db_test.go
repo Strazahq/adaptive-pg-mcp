@@ -30,7 +30,7 @@ func harness(t *testing.T, l pgtest.Login, d pgtest.Database) map[string]string 
 }
 
 func TestCheckCommand(t *testing.T) {
-	const passes = "check: no start check refuses, so adaptive-pg-mcp would start.\n"
+	const passes = "check: no refusals, so adaptive-pg-mcp would start.\n"
 	cases := []struct {
 		name    string
 		options []string
@@ -40,21 +40,21 @@ func TestCheckCommand(t *testing.T) {
 	}{
 		{"a plain login passes", nil, "", 0, func(pgtest.Login) string { return passes }},
 		{"a report does not refuse", []string{"BYPASSRLS"}, "", 0, func(pgtest.Login) string {
-			return "report: the read login of helpdesk has BYPASSRLS, so no row-level security policy limits what its calls read or change. A login without BYPASSRLS keeps the policies in force.\n" +
-				"report: the write login of helpdesk has BYPASSRLS, so no row-level security policy limits what its calls read or change. A login without BYPASSRLS keeps the policies in force.\n" +
-				"report: the login of sales_eu has BYPASSRLS, so no row-level security policy limits what its calls read or change. A login without BYPASSRLS keeps the policies in force.\n" + passes
+			return "report: the read login of helpdesk has BYPASSRLS, so row-level security policies do not apply to its calls. A login without BYPASSRLS keeps them in force.\n" +
+				"report: the write login of helpdesk has BYPASSRLS, so row-level security policies do not apply to its calls. A login without BYPASSRLS keeps them in force.\n" +
+				"report: the login of sales_eu has BYPASSRLS, so row-level security policies do not apply to its calls. A login without BYPASSRLS keeps them in force.\n" + passes
 		}},
 		{"a superuser refuses on every database", []string{"SUPERUSER"}, "", 1, func(pgtest.Login) string {
-			return "refusal: the read login of helpdesk is a superuser and free SQL is on, so adaptive-pg-mcp will not start. Use a login without superuser, turn free_sql off, or set allow_superuser: true for helpdesk.\n" +
-				"refusal: the write login of helpdesk is a superuser and free SQL is on, so adaptive-pg-mcp will not start. Use a login without superuser, turn free_sql off, or set allow_superuser: true for helpdesk.\n" +
-				"refusal: the login of sales_eu is a superuser and free SQL is on, so adaptive-pg-mcp will not start. Use a login without superuser, turn free_sql off, or set allow_superuser: true for sales_eu.\n" +
-				"check: 3 of the findings above refuse the start, so adaptive-pg-mcp would not start. Fix what each refusal says, and run adaptive-pg-mcp check again.\n"
+			return "refusal: the read login of helpdesk is a superuser and free SQL is on. Use a login without superuser, turn free_sql off, or set allow_superuser: true for helpdesk.\n" +
+				"refusal: the write login of helpdesk is a superuser and free SQL is on. Use a login without superuser, turn free_sql off, or set allow_superuser: true for helpdesk.\n" +
+				"refusal: the login of sales_eu is a superuser and free SQL is on. Use a login without superuser, turn free_sql off, or set allow_superuser: true for sales_eu.\n" +
+				"check: 3 refusals above, so adaptive-pg-mcp would not start. Fix them, and run adaptive-pg-mcp check again.\n"
 		}},
 		{"allow_superuser on one database leaves one refusal", []string{"SUPERUSER"}, "    allow_superuser: true\n", 1, func(pgtest.Login) string {
-			return "report: the read login of helpdesk is a superuser and free SQL is on, which allow_superuser: true accepts for helpdesk. A superuser's free SQL is not limited to the database, so a login without superuser is the safer setup.\n" +
-				"report: the write login of helpdesk is a superuser and free SQL is on, which allow_superuser: true accepts for helpdesk. A superuser's free SQL is not limited to the database, so a login without superuser is the safer setup.\n" +
-				"refusal: the login of sales_eu is a superuser and free SQL is on, so adaptive-pg-mcp will not start. Use a login without superuser, turn free_sql off, or set allow_superuser: true for sales_eu.\n" +
-				"check: 1 of the findings above refuses the start, so adaptive-pg-mcp would not start. Fix what it says, and run adaptive-pg-mcp check again.\n"
+			return "report: the read login of helpdesk is a superuser and free SQL is on, which allow_superuser: true accepts for helpdesk. Its free SQL is not confined to helpdesk.\n" +
+				"report: the write login of helpdesk is a superuser and free SQL is on, which allow_superuser: true accepts for helpdesk. Its free SQL is not confined to helpdesk.\n" +
+				"refusal: the login of sales_eu is a superuser and free SQL is on. Use a login without superuser, turn free_sql off, or set allow_superuser: true for sales_eu.\n" +
+				"check: 1 refusal above, so adaptive-pg-mcp would not start. Fix it, and run adaptive-pg-mcp check again.\n"
 		}},
 	}
 	for _, s := range pgtest.Servers(t) {
@@ -87,7 +87,8 @@ func TestSecretsStayOutOfLogsAndErrorsOnAHarnessDatabase(t *testing.T) {
 			env := harness(t, l, d)
 			path := writeConfig(t, "127.0.0.1:0", "")
 
-			// check with the right password, a wrong one and a database that does not exist.
+			// check with the right password, a wrong one and a database that
+			// does not exist.
 			wrong := map[string]string{}
 			gone := map[string]string{}
 			for k, v := range env {
@@ -113,7 +114,8 @@ func TestSecretsStayOutOfLogsAndErrorsOnAHarnessDatabase(t *testing.T) {
 			}
 			keep(out.String() + errs.String())
 
-			// serve on stdio with the right token and a wrong password, which must leave stdout to the protocol.
+			// serve on stdio with the right token and a wrong password, which
+			// must leave stdout to the protocol.
 			out.Reset()
 			errs.Reset()
 			if code := run(context.Background(), []string{"serve", "-config", writeConfig(t, "stdio", "")}, &out, &errs, lookup(wrong)); code != 1 || out.Len() != 0 {
@@ -124,7 +126,8 @@ func TestSecretsStayOutOfLogsAndErrorsOnAHarnessDatabase(t *testing.T) {
 			}
 			keep(out.String() + errs.String())
 
-			// serve on HTTP with the right password, refused and admitted requests, list_databases and the data tools.
+			// serve on HTTP with the right password: refused and admitted
+			// requests, list_databases and the data tools.
 			admin := d.Connect(t)
 			for _, sql := range []string{"CREATE TABLE tickets (id int)", "GRANT SELECT ON tickets TO " + pgx.Identifier{l.Name}.Sanitize()} {
 				if _, err := admin.Exec(t.Context(), sql); err != nil {
@@ -133,13 +136,15 @@ func TestSecretsStayOutOfLogsAndErrorsOnAHarnessDatabase(t *testing.T) {
 			}
 			serveHTTP(t, path, env, keep)
 
-			// check with a catalog statement that does not prepare, and serve one whose call fails, both with the known password in a value that Postgres repeats.
+			// check a catalog statement that does not prepare, and serve one
+			// whose call fails, both with the known password in a value that
+			// Postgres repeats.
 			const failing = "-- name: count_as\nSELECT $1::text::int4 AS n\n"
-			const failingEntry = "  count_as:\n    description: Reads a value as a number. Answers one row.\n    mode: read\n    databases: [helpdesk]\n    login: read\n    params:\n      - name: value\n        description: The value.\n        required: true\n"
+			const failingEntry = "  count_as:\n    description: Reads a value as a number. Returns one row.\n    mode: read\n    databases: [helpdesk]\n    login: read\n    params:\n      - name: value\n        description: The value.\n        required: true\n"
 			unprepared := writeConfig(t, "127.0.0.1:0", "")
 			addCatalog(t, unprepared, map[string]string{
 				"helpdesk/tickets.sql": "-- name: password_cast\nSELECT '" + password + "'::int4\n\n" + failing,
-				"helpdesk/tools.yaml":  "version: 1\ntools:\n  password_cast:\n    description: Reads a fixed text as a number. Answers one row.\n    mode: read\n    databases: [helpdesk]\n    login: read\n" + failingEntry,
+				"helpdesk/tools.yaml":  "version: 1\ntools:\n  password_cast:\n    description: Reads a fixed text as a number. Returns one row.\n    mode: read\n    databases: [helpdesk]\n    login: read\n" + failingEntry,
 			}, "count_as")
 			out.Reset()
 			errs.Reset()
@@ -159,9 +164,9 @@ func TestSecretsStayOutOfLogsAndErrorsOnAHarnessDatabase(t *testing.T) {
 			for _, must := range []string{
 				"password authentication failed for user", "does not exist", "refused an HTTP request", "list_databases found 1 database: helpdesk.",
 				"list_tables found 1 table on helpdesk.", `invalid input syntax for type integer: \"[hidden]\"`, "read_rows found no table public.absent on helpdesk",
-				"support_bot may not use sales_eu", "support_bot may not use query_sql",
-				`statement password_cast does not prepare on helpdesk: the server answered: invalid input syntax for type integer: "[hidden]" (SQLSTATE 22P02)`,
-				`count_as on helpdesk failed, because the server answered: invalid input syntax for type integer: "[hidden]" (SQLSTATE 22P02)`,
+				"access.yaml does not list sales_eu for support_bot", "access.yaml does not list query_sql for support_bot",
+				`statement password_cast does not prepare on helpdesk: Postgres said: invalid input syntax for type integer: "[hidden]" (SQLSTATE 22P02)`,
+				`count_as on helpdesk failed, because Postgres said: invalid input syntax for type integer: "[hidden]" (SQLSTATE 22P02)`,
 			} {
 				if !strings.Contains(seen.String(), must) {
 					t.Errorf("the capture misses %q, which it should hold:\n%s", must, seen.String())
@@ -171,7 +176,8 @@ func TestSecretsStayOutOfLogsAndErrorsOnAHarnessDatabase(t *testing.T) {
 	}
 }
 
-// tlsBearer adds the known token to every request of the SDK client and sends it on base.
+// tlsBearer adds the known token to every request of the SDK client and
+// sends it on base.
 type tlsBearer struct{ base http.RoundTripper }
 
 // RoundTrip sends r with the known token in its Authorization header.
@@ -245,7 +251,7 @@ func TestServeOverHTTPS(t *testing.T) {
 	}
 }
 
-// writeCatalogConfig writes server.yaml in mode straza with a catalog of one
+// writeCatalogConfig writes server.yaml in straza mode with a catalog of one
 // statement on helpdesk, which reads the status column of tickets, and
 // returns the path of server.yaml.
 func writeCatalogConfig(t *testing.T) string {
@@ -255,7 +261,7 @@ func writeCatalogConfig(t *testing.T) string {
 		"server.yaml": "version: 1\nmode: straza\nlisten: stdio\nfree_sql: \"off\"\nlimits: { rows: 1000, bytes: 1048576, timeout: 30s, write_rows: 100 }\n" +
 			"gateway_tokens_sha256: [\"" + hashHex(knownToken) + "\"]\ncatalog: ./catalog\ndatabases:\n  helpdesk:\n    login: { dsn_env: HELPDESK_DSN }\n",
 		"catalog/helpdesk/tickets.sql": "-- name: open_tickets\nSELECT id FROM tickets WHERE status = 'open'\n",
-		"catalog/helpdesk/tools.yaml":  "version: 1\ntools:\n  open_tickets:\n    description: Lists the open tickets. Answers one row per ticket.\n    mode: read\n    databases: [helpdesk]\n    login: read\n    limits: { rows: 2000 }\n",
+		"catalog/helpdesk/tools.yaml":  "version: 1\ntools:\n  open_tickets:\n    description: Lists the open tickets. Returns one row per ticket.\n    mode: read\n    databases: [helpdesk]\n    login: read\n    limits: { rows: 2000 }\n",
 	}
 	for name, text := range files {
 		path := filepath.Join(dir, filepath.FromSlash(name))
@@ -273,16 +279,16 @@ func TestCheckCommandChecksTheCatalog(t *testing.T) {
 	for _, s := range pgtest.Servers(t) {
 		t.Run(s.String(), func(t *testing.T) {
 			l := pgtest.NewLogin(t, s, password)
-			const raised = "report: helpdesk/tools.yaml entry open_tickets raises limits.rows to 2,000, above the 1,000 that server.yaml sets, so its calls may go past the cap of the built-in tools. Lower it in the entry if that is not intended.\n"
+			const raised = "report: helpdesk/tools.yaml: the catalog tool open_tickets raises limits.rows to 2,000, above the 1,000 in server.yaml. Lower it if that is not intended.\n"
 			cases := []struct {
 				name, table string
 				code        int
 				stdout      string
 			}{
-				{"a catalog that prepares", "CREATE TABLE tickets (id int, status text)", 0, raised + "check: no start check refuses, so adaptive-pg-mcp would start.\n"},
+				{"a catalog that prepares", "CREATE TABLE tickets (id int, status text)", 0, raised + "check: no refusals, so adaptive-pg-mcp would start.\n"},
 				{"a statement that does not prepare", "CREATE TABLE tickets (id int)", 1, raised +
-					"refusal: helpdesk/tickets.sql statement open_tickets does not prepare on helpdesk: the server answered: column \"status\" does not exist (SQLSTATE 42703). Fix the statement or remove helpdesk from its databases.\n" +
-					"check: 1 of the findings above refuses the start, so adaptive-pg-mcp would not start. Fix what it says, and run adaptive-pg-mcp check again.\n"},
+					"refusal: helpdesk/tickets.sql statement open_tickets does not prepare on helpdesk: Postgres said: column \"status\" does not exist (SQLSTATE 42703). Fix the statement, or remove helpdesk from its databases.\n" +
+					"check: 1 refusal above, so adaptive-pg-mcp would not start. Fix it, and run adaptive-pg-mcp check again.\n"},
 			}
 			path := writeCatalogConfig(t)
 			for _, c := range cases {
@@ -335,7 +341,7 @@ func addCatalog(t *testing.T, path string, files map[string]string, tools ...str
 }
 
 // callCatalog serves the config at path on HTTP, calls tool with args with
-// the known token, and stops the server. It returns the text of the answer
+// the known token, and stops the server. It returns the text of the result
 // and every log line.
 func callCatalog(t *testing.T, path string, env map[string]string, tool string, args map[string]any) string {
 	t.Helper()

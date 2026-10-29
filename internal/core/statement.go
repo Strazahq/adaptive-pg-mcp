@@ -77,7 +77,7 @@ func checkWhere(tool string, where []condition) error {
 		switch w.Op {
 		case "is null", "is not null":
 			if given {
-				return argError(tool, at+" has op "+w.Op+", which takes no value, and the call passed one")
+				return argError(tool, at+" has op "+w.Op+", which takes no value")
 			}
 		case "in", "not in":
 			var list []json.RawMessage
@@ -85,18 +85,19 @@ func checkWhere(tool string, where []condition) error {
 				return argError(tool, at+" has op "+w.Op+", which takes a list of values, and the call passed "+passed(w.Value))
 			}
 			if len(list) == 0 || len(list) > maxIn {
-				return argError(tool, at+" has op "+w.Op+", which takes 1 to "+count(maxIn)+" values, and the call passed "+count(int64(len(list))))
+				return argError(tool, at+" has op "+w.Op+", which takes 1 to "+count(maxIn)+" values, not "+count(int64(len(list))))
 			}
 		default:
 			if !given {
-				return argError(tool, at+" has op "+w.Op+", which takes a value that is not null, and the call passed "+passed(w.Value)+", while is null matches a null")
+				return argError(tool, at+" has op "+w.Op+", which takes a value that is not null. Use op is null to match null")
 			}
 		}
 	}
 	return nil
 }
 
-// passed names the value of a where entry for a sentence: none when the entry leaves it out, or its JSON kind.
+// passed names the value of a where entry for a sentence: none when the entry
+// leaves it out, or its JSON kind.
 func passed(raw json.RawMessage) string {
 	if raw == nil {
 		return "none"
@@ -170,7 +171,8 @@ type tableColumn struct {
 	readable bool
 }
 
-// tableColumns are the columns of one table that the login may use, in their order in the table.
+// tableColumns are the columns of one table that the login may use, in table
+// order.
 type tableColumns struct {
 	call   *call
 	schema string
@@ -211,19 +213,20 @@ func (c *call) columnsOf(ctx context.Context, tx *pg.Tx, schema, table string) (
 		return nil, err
 	}
 	if len(cols.order) == 0 {
-		return nil, refuse(c.tool + " found no table " + schema + "." + table + " on " + c.database + " that its login may use, so the call is refused. Call list_tables to see the tables it may use.")
+		return nil, refuse(c.tool + " found no table " + schema + "." + table + " on " + c.database + " that its login may use. Call list_tables for the tables it may use.")
 	}
 	return cols, nil
 }
 
-// get returns the column of that name, or refuses the call when the table has none the login may use.
+// get returns the column of that name, or refuses the call when the table
+// has none that the login may use.
 func (t *tableColumns) get(name string) (tableColumn, error) {
 	for _, col := range t.order {
 		if col.name == name {
 			return col, nil
 		}
 	}
-	return tableColumn{}, refuse(t.schema + "." + t.table + " on " + t.call.database + " has no column " + strconv.Quote(name) + " that the login may use, so " + t.call.tool + " is refused. Call describe_table to see its columns.")
+	return tableColumn{}, refuse(t.schema + "." + t.table + " on " + t.call.database + " has no column " + strconv.Quote(name) + " that the login may use. Call describe_table to see its columns.")
 }
 
 // all checks that every name is a column, and returns the names.
@@ -250,15 +253,16 @@ func (t *tableColumns) readable() []string {
 // qualified writes schema.table with both names quoted.
 func qualified(schema, table string) string { return pg.Quote(schema) + "." + pg.Quote(table) }
 
-// target is the table a tool names, with public when the call leaves the schema out.
+// target is the table a tool names, with public when the call leaves the
+// schema out.
 type target struct {
 	Database string `json:"database"`
 	Schema   string `json:"schema"`
 	Table    string `json:"table"`
 }
 
-// resolve fills in public for a schema the call leaves out, and narrows a
-// caller whose access.yaml entry lists tables to those tables.
+// resolve fills in public for a schema the call leaves out, and refuses a
+// table outside the tables access.yaml lists for the caller.
 func (t *target) resolve(c *call) error {
 	if t.Schema == "" {
 		t.Schema = "public"

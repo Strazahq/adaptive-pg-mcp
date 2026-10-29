@@ -1,14 +1,14 @@
-// Package pg holds a connection pool per database login, the one quoting
-// helper for identifiers, and the one path that sends a statement of the
-// server to Postgres.
+// Package pg holds a connection pool per login, the quoting helper for
+// identifiers, and the only path by which adaptive-pg-mcp sends SQL to
+// Postgres.
 //
-// Every statement goes through Tx.Query, inside a transaction that Pools.Run
+// Every statement goes through Tx.Query, in a transaction that Pools.Run
 // opens. Query sends it as one unnamed prepared statement on the extended
-// protocol, which carries exactly one statement, even when it has no
-// arguments. pgx itself would send an argument-free Exec on the simple query
-// protocol, which can carry several statements, so nothing in this package
-// calls Exec. Tx.Describe sends a statement on the same protocol to learn its
-// parameter types, and never runs it.
+// protocol, which carries exactly one statement, even without arguments. pgx
+// would send an argument-free Exec on the simple query protocol, which can
+// carry several statements, so nothing in this package calls Exec.
+// Tx.Describe uses the same protocol to learn the parameter types of a
+// statement without running it.
 package pg
 
 import (
@@ -22,11 +22,13 @@ import (
 	"github.com/strazahq/adaptive-pg-mcp/internal/config"
 )
 
-// Login names one login of one database by the database's config name and the login's role, such as read or write.
+// Login names one login by the config name of its database and its role,
+// such as read or write.
 type Login struct {
 	// Database is the config name of the database.
 	Database string
-	// Role is the login's name in the database's logins, such as read, write or finance_reader.
+	// Role is the login's key in the database's logins, such as read, write
+	// or finance_reader.
 	Role string
 }
 
@@ -40,24 +42,25 @@ const (
 	ReadWrite
 )
 
-// closeTimeout bounds the close of a connection that Run does not return to its pool.
+// closeTimeout bounds the close of a connection that Run does not return to
+// its pool.
 const closeTimeout = 5 * time.Second
 
-// Pools holds one connection pool per login. It connects to a login the first time a call runs on it.
+// Pools holds one connection pool per login. It connects to a login the
+// first time a call runs on it.
 type Pools struct {
 	pools map[Login]*pgxpool.Pool
-	// secrets are the connection strings and passwords of every pool, which Error texts never carry.
+	// secrets are the connection strings and passwords that Reason hides.
 	secrets []string
 }
 
 // NewPools returns an empty set of pools.
 func NewPools() *Pools { return &Pools{pools: map[Login]*pgxpool.Pool{}} }
 
-// Add makes one pool from dsn and gives it to every login in logins, so that
-// a database whose one login reads and writes holds one pool. It connects to
-// nothing yet. The TLS settings are the ones the connection string asks for,
-// unchanged. A connection string that does not parse is refused with an
-// Error that never repeats it.
+// Add makes one pool from dsn and shares it among logins, so a database with
+// a single login holds one pool. It does not connect yet. TLS settings come
+// from the connection string unchanged. A connection string that does not
+// parse returns an Error that never repeats it.
 func (p *Pools) Add(dsn config.DSN, logins ...Login) error {
 	cfg, err := pgxpool.ParseConfig(dsn.Reveal())
 	if err != nil {
@@ -89,13 +92,13 @@ func (p *Pools) Close() {
 }
 
 // Run runs fn in one transaction on one connection of login l. Only
-// ReadWrite gives a read-write transaction, and every other access runs as
-// BEGIN READ ONLY. Its first statement sets
-// statement_timeout to timeout for this transaction only, through a bind
-// parameter. Run commits when fn returns nil, and rolls back and returns the
-// error of fn unchanged otherwise. The connection goes back to the pool,
-// unless fn called Tx.Discard. Every failure of Run itself is an *Error,
-// whose text holds no connection string and no password.
+// ReadWrite gives a read-write transaction, and any other access runs as
+// BEGIN READ ONLY. The first statement sets statement_timeout to timeout for
+// this transaction only, through a bind parameter. Run commits when fn
+// returns nil, and otherwise rolls back and returns the error of fn
+// unchanged. The connection goes back to the pool unless fn called
+// Tx.Discard. Every failure of Run itself is an *Error, whose text holds no
+// connection string or password.
 func (p *Pools) Run(ctx context.Context, l Login, access Access, timeout time.Duration, fn func(*Tx) error) error {
 	pool, ok := p.pools[l]
 	if !ok {
@@ -142,20 +145,21 @@ func (p *Pools) Run(ctx context.Context, l Login, access Access, timeout time.Du
 // Tx is one transaction on one connection, open for the length of a Run.
 type Tx struct {
 	tx pgx.Tx
-	// discard is true when Run closes the connection instead of returning it to the pool.
+	// discard is true when Run closes the connection instead of returning it
+	// to the pool.
 	discard bool
 }
 
-// Discard makes Run close the connection of t once its transaction ends,
-// instead of returning it to the pool. A statement that is not the server's
-// own can change its session, such as its role, its search_path or a
-// temporary table, and a closed connection carries none of it into a later call.
+// Discard makes Run close the connection of t when its transaction ends,
+// instead of returning it to the pool. A caller's statement can change the
+// session, such as its role, search_path or temporary tables, and a closed
+// connection carries none of that into a later call.
 func (t *Tx) Discard() { t.discard = true }
 
 // Query sends sql with args as one unnamed prepared statement on the extended
-// protocol and returns its rows, which the caller closes. It is the one path
-// every statement of the server takes. Postgres refuses a text that holds more
-// than one statement, and an empty text is refused before it is sent.
+// protocol and returns its rows, which the caller closes. Every statement
+// that adaptive-pg-mcp sends takes this path. Postgres refuses a text with
+// more than one statement, and an empty text is refused before it is sent.
 func (t *Tx) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
 	if sql == "" {
 		return nil, &Error{Reason: "the statement is empty"}
@@ -170,11 +174,10 @@ func (t *Tx) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, erro
 }
 
 // Describe sends sql as one unnamed prepared statement on the extended
-// protocol with Parse and Describe only, and returns the type OIDs of its
-// parameters in $1 order. Postgres parses and analyzes the statement and
-// never runs it, it reports a parameter of a domain as the domain, and it
-// refuses a text that holds more than one statement. An empty text is
-// refused before it is sent.
+// protocol with Parse and Describe only, and returns its parameter type OIDs
+// in $1 order. Postgres analyzes the statement without running it, reports a
+// domain parameter as the domain, and refuses a text with more than one
+// statement. An empty text is refused before it is sent.
 func (t *Tx) Describe(ctx context.Context, sql string) ([]uint32, error) {
 	if sql == "" {
 		return nil, &Error{Reason: "the statement is empty"}
@@ -202,7 +205,7 @@ func millis(d time.Duration) string {
 	return strconv.FormatInt(int64(max((d+time.Millisecond-1)/time.Millisecond, 1)), 10)
 }
 
-// Quote returns name as one quoted Postgres identifier. It is the one helper
-// that puts an identifier into SQL text, and it doubles every quote in name,
-// so the result never ends the identifier early.
+// Quote returns name as one quoted Postgres identifier. It doubles every
+// double quote in name, so the result never ends the identifier early. It is
+// the only way an identifier enters SQL text.
 func Quote(name string) string { return pgx.Identifier{name}.Sanitize() }

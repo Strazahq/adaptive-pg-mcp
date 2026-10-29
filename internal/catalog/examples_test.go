@@ -8,7 +8,8 @@ import (
 	"github.com/strazahq/adaptive-pg-mcp/internal/config"
 )
 
-// TestTheExampleCatalogLoads loads the catalog that examples/server.yaml names, so a format change cannot leave it behind.
+// TestTheExampleCatalogLoads loads the catalog that examples/server.yaml
+// names, so a format change cannot leave it behind.
 func TestTheExampleCatalogLoads(t *testing.T) {
 	getenv := func(string) string { return "postgres://reader@db.example.internal:5432/helpdesk" }
 	cfg, err := config.Load(filepath.Join("..", "..", "examples", "server.yaml"), getenv)

@@ -100,12 +100,12 @@ func withCatalogTools(t *testing.T, s *Server) *Server {
 	t.Helper()
 	queue, half, most := 8, 0.5, 99.5
 	for _, e := range []catalog.Entry{
-		{Name: "revenue_eu", Description: "Sums revenue per region for one month. Answers one row per region, at most the row cap.", Mode: catalog.Read, Databases: []string{"sales_eu"}, Login: "read", SQL: "select 1", Source: "finance/revenue.sql",
+		{Name: "revenue_eu", Description: "Sums revenue per region for one month. Returns one row per region, at most the row cap.", Mode: catalog.Read, Databases: []string{"sales_eu"}, Login: "read", SQL: "select 1", Source: "finance/revenue.sql",
 			Params: []catalog.Param{
 				{Name: "month", Description: "The first day of the month, such as 2026-09-01.", Type: "date", Required: true},
 				{Name: "min_share", Description: "The smallest share of the total a region must have, from 0.5 to 99.5.", Type: "numeric", Minimum: &half, Maximum: &most},
 			}},
-		{Name: "tickets_by_day", Description: "Counts tickets per day. Answers one row per day, at most the row cap.", Mode: catalog.Read, Databases: []string{"helpdesk", "sales_eu"}, Login: "read", SQL: "select 1", Source: "support/tickets.sql",
+		{Name: "tickets_by_day", Description: "Counts tickets per day. Returns one row per day, at most the row cap.", Mode: catalog.Read, Databases: []string{"helpdesk", "sales_eu"}, Login: "read", SQL: "select 1", Source: "support/tickets.sql",
 			Params: []catalog.Param{
 				{Name: "day", Description: "The first day to count, such as 2026-10-01.", Type: "date", Required: true},
 				{Name: "queue", Description: "The queue in lowercase letters, or none for every queue.", Type: "text", Pattern: "^[a-z]+$", MaxLength: &queue},
@@ -121,7 +121,7 @@ func withCatalogTools(t *testing.T, s *Server) *Server {
 func TestServedCatalogToolsPassTheToolLint(t *testing.T) {
 	s := withCatalogTools(t, New(dataConfig(config.Straza, config.FreeSQLOff), slog.New(slog.DiscardHandler)))
 	write := catalog.Entry{
-		Name: "close_tickets", Description: "Closes the tickets of one queue. Answers rowsAffected, and changes at most the write cap.", Mode: catalog.Write,
+		Name: "close_tickets", Description: "Closes the tickets of one queue. Returns rowsAffected, and changes at most the write cap.", Mode: catalog.Write,
 		Databases: []string{"helpdesk"}, Login: "write", SQL: "update tickets set status = 'closed' where queue = $1", Source: "support/close.sql",
 		Params: []catalog.Param{{Name: "queue", Description: "The queue to close.", Type: "text", Required: true}},
 	}

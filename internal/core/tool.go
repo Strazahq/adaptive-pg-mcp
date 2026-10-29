@@ -1,5 +1,6 @@
-// Package core serves adaptive-pg-mcp over stdio and Streamable HTTP, checks
-// the token of every caller, and turns catalog entries into MCP tools.
+// Package core serves the built-in tools and the catalog tools of
+// adaptive-pg-mcp over stdio and Streamable HTTP, and checks the token of
+// every caller.
 package core
 
 import (
@@ -18,14 +19,14 @@ import (
 // nameRule is the snake_case form of every tool name and argument name.
 var nameRule = regexp.MustCompile(`^[a-z][a-z0-9]*(_[a-z0-9]+)*$`)
 
-// maxName is the longest tool name or argument name.
+// maxName is the longest a tool name or argument name may be.
 const maxName = 128
 
-// databaseArg is the argument every data tool names its database in.
+// databaseArg is the argument that names the database of a call.
 const databaseArg = "database"
 
-// argType is the JSON Schema type and format an agent sees for a Postgres type.
-// An empty jsonType takes any JSON value.
+// argType is the JSON Schema type and format of a Postgres type. An empty
+// jsonType takes any JSON value.
 type argType struct {
 	jsonType string
 	format   string
@@ -53,25 +54,25 @@ var argTypes = map[string]argType{
 	"jsonb":       {},
 }
 
-// Tool builds the MCP tool for a catalog entry, or returns a sentence that
-// says why the entry cannot be a tool and what to fix.
+// Tool builds the MCP tool for a catalog statement, or returns an error that
+// says what to fix.
 func Tool(e catalog.Entry) (*mcp.Tool, error) {
 	at := e.Source + " statement " + e.Name
 	if len(e.Name) > maxName || !nameRule.MatchString(e.Name) {
-		return nil, fmt.Errorf("%s does not have a valid tool name. A tool name is 1 to 128 lowercase letters, digits and underscores that starts with a letter, so rename it in its -- name: line.", at)
+		return nil, fmt.Errorf("%s has an invalid tool name. In its -- name: line, use snake_case of 1 to 128 characters that starts with a letter.", at)
 	}
 	if strings.TrimSpace(e.Description) == "" {
-		return nil, fmt.Errorf("%s has no description in its index. Write one that says what the tool does, what it returns and its limits.", at)
+		return nil, fmt.Errorf("%s has no description in tools.yaml. Say what the tool does, what it returns and its caps.", at)
 	}
 	if e.Mode != catalog.Read && e.Mode != catalog.Write {
-		return nil, fmt.Errorf("%s has no mode of read or write in its index. Set mode to read or write.", at)
+		return nil, fmt.Errorf("%s needs mode read or write in tools.yaml.", at)
 	}
 	if len(e.Databases) == 0 {
-		return nil, fmt.Errorf("%s names no databases in its index. List the databases it runs on.", at)
+		return nil, fmt.Errorf("%s names no databases in tools.yaml. List the databases it runs on.", at)
 	}
 	for i, db := range e.Databases {
 		if slices.Contains(e.Databases[:i], db) {
-			return nil, fmt.Errorf("%s lists the database %s twice in its index. List each database once.", at, db)
+			return nil, fmt.Errorf("%s lists the database %s twice in tools.yaml. List it once.", at, db)
 		}
 	}
 
@@ -88,7 +89,7 @@ func Tool(e catalog.Entry) (*mcp.Tool, error) {
 			return nil, err
 		}
 		if _, dup := in.Properties[p.Name]; dup {
-			return nil, fmt.Errorf("%s has more than one parameter named %s. Give each parameter its own name in the index.", at, p.Name)
+			return nil, fmt.Errorf("%s has more than one parameter named %s in tools.yaml. Give each parameter a unique name.", at, p.Name)
 		}
 		in.Properties[p.Name] = s
 		in.PropertyOrder = append(in.PropertyOrder, p.Name)
@@ -107,26 +108,26 @@ func Tool(e catalog.Entry) (*mcp.Tool, error) {
 	}, nil
 }
 
-// databaseSchema is the required database argument, limited to the entry's databases.
+// databaseSchema is the required database argument, limited to names.
 func databaseSchema(names []string) *jsonschema.Schema {
 	enum := make([]any, len(names))
 	for i, n := range names {
 		enum[i] = n
 	}
-	return &jsonschema.Schema{Type: "string", Description: "The database to run on, by its config name.", Enum: enum}
+	return &jsonschema.Schema{Type: "string", Description: "The database to run on.", Enum: enum}
 }
 
-// paramSchema builds the argument schema for parameter $n, or says why the
-// parameter cannot be an argument.
+// paramSchema builds the argument schema for parameter $n, or returns an
+// error that says what to fix.
 func paramSchema(at string, n int, p catalog.Param) (*jsonschema.Schema, error) {
 	if len(p.Name) > maxName || !nameRule.MatchString(p.Name) {
-		return nil, fmt.Errorf("%s has parameter $%d named %q, which is not a valid argument name. Use 1 to 128 lowercase letters, digits and underscores that start with a letter.", at, n, p.Name)
+		return nil, fmt.Errorf("%s has parameter $%d named %q, an invalid argument name. Use snake_case of 1 to 128 characters that starts with a letter.", at, n, p.Name)
 	}
 	if p.Name == databaseArg {
-		return nil, fmt.Errorf("%s has parameter $%d named database, which every tool already uses for the database to run on. Rename the parameter in its index.", at, n)
+		return nil, fmt.Errorf("%s has parameter $%d named database, which every tool reserves for the database to run on. Rename it in tools.yaml.", at, n)
 	}
 	if strings.TrimSpace(p.Description) == "" {
-		return nil, fmt.Errorf("%s has no description for parameter $%d %s in its index. Describe what the agent passes in it.", at, n, p.Name)
+		return nil, fmt.Errorf("%s has no description for parameter $%d %s in tools.yaml. Say what the agent passes in it.", at, n, p.Name)
 	}
 	t, ok := argTypes[p.Type]
 	if !ok {
@@ -153,7 +154,7 @@ func paramSchema(at string, n int, p catalog.Param) (*jsonschema.Schema, error) 
 	}
 	if p.Pattern != "" {
 		if _, err := regexp.Compile(p.Pattern); err != nil {
-			return nil, fmt.Errorf("%s has a pattern for parameter $%d %s that does not compile: %v. Fix the pattern in its index.", at, n, p.Name, err)
+			return nil, fmt.Errorf("%s has a pattern for parameter $%d %s that does not compile: %v. Fix the pattern in tools.yaml.", at, n, p.Name, err)
 		}
 	}
 
@@ -172,8 +173,9 @@ func paramSchema(at string, n int, p catalog.Param) (*jsonschema.Schema, error) 
 	return s, nil
 }
 
-// annotations are the hints of a catalog tool. A read changes nothing and
-// repeats safely, a write may change rows, and both stay inside the database.
+// annotations returns the hints of a tool in mode m. A read is read-only and
+// idempotent, a write is destructive, and neither reaches outside the
+// database.
 func annotations(m catalog.Mode) *mcp.ToolAnnotations {
 	read := m == catalog.Read
 	destructive, openWorld := !read, false
@@ -185,17 +187,17 @@ func annotations(m catalog.Mode) *mcp.ToolAnnotations {
 	}
 }
 
-// outputSchema is the shape of every answer of a tool in mode m. Rows are
-// arrays in column order, because Postgres allows two columns with one name.
+// outputSchema returns the output schema of a tool in mode m. Rows are arrays
+// in column order, because a result may hold two columns with one name.
 func outputSchema(m catalog.Mode) *jsonschema.Schema {
 	columns := &jsonschema.Schema{
 		Type:        "array",
-		Description: "The result columns in order, each with its name and Postgres type.",
+		Description: "The result columns, in order.",
 		Items: &jsonschema.Schema{
 			Type: "object",
 			Properties: map[string]*jsonschema.Schema{
 				"name": {Type: "string", Description: "The column name."},
-				"type": {Type: "string", Description: "The Postgres type name, such as int4."},
+				"type": {Type: "string", Description: "The Postgres type, such as int4."},
 			},
 			Required:      []string{"name", "type"},
 			PropertyOrder: []string{"name", "type"},
@@ -203,7 +205,7 @@ func outputSchema(m catalog.Mode) *jsonschema.Schema {
 	}
 	rows := &jsonschema.Schema{
 		Type:        "array",
-		Description: "The rows the statement answers, each an array of values in column order.",
+		Description: "The result rows, each an array in column order.",
 		Items:       &jsonschema.Schema{Type: "array"},
 	}
 	out := &jsonschema.Schema{
@@ -211,10 +213,10 @@ func outputSchema(m catalog.Mode) *jsonschema.Schema {
 		Properties: map[string]*jsonschema.Schema{"columns": columns, "rows": rows},
 	}
 	if m == catalog.Write {
-		out.Properties["rowsAffected"] = &jsonschema.Schema{Type: "integer", Description: "The number of rows the statement changed."}
+		out.Properties["rowsAffected"] = &jsonschema.Schema{Type: "integer", Description: "The number of rows changed."}
 		out.PropertyOrder = []string{"rowsAffected", "columns", "rows"}
 	} else {
-		out.Properties["truncated"] = &jsonschema.Schema{Type: "boolean", Description: "True when more rows follow than the answer holds, because of the row cap, the byte cap or the limit of the call."}
+		out.Properties["truncated"] = &jsonschema.Schema{Type: "boolean", Description: "True when the row cap, the byte cap or limit cut off more rows."}
 		out.PropertyOrder = []string{"columns", "rows", "truncated"}
 	}
 	out.Required = out.PropertyOrder

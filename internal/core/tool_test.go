@@ -16,7 +16,7 @@ import (
 func revenue() catalog.Entry {
 	return catalog.Entry{
 		Name:        "revenue_by_region",
-		Description: "Sums net revenue per region for one month. Answers one row per region, at most the row cap.",
+		Description: "Sums net revenue per region for one month. Returns one row per region, at most the row cap.",
 		Mode:        catalog.Read,
 		Databases:   []string{"sales_eu", "sales_us"},
 		Login:       "read",
@@ -120,25 +120,25 @@ func TestToolRefusesBadEntries(t *testing.T) {
 		want   string
 	}{
 		{"name with capitals", func(e *catalog.Entry) { e.Name = "Revenue_By_Region" },
-			"finance/revenue.sql statement Revenue_By_Region does not have a valid tool name. A tool name is 1 to 128 lowercase letters, digits and underscores that starts with a letter, so rename it in its -- name: line."},
+			"finance/revenue.sql statement Revenue_By_Region has an invalid tool name. In its -- name: line, use snake_case of 1 to 128 characters that starts with a letter."},
 		{"name too long", func(e *catalog.Entry) { e.Name = strings.Repeat("a", 129) },
-			"finance/revenue.sql statement " + strings.Repeat("a", 129) + " does not have a valid tool name. A tool name is 1 to 128 lowercase letters, digits and underscores that starts with a letter, so rename it in its -- name: line."},
+			"finance/revenue.sql statement " + strings.Repeat("a", 129) + " has an invalid tool name. In its -- name: line, use snake_case of 1 to 128 characters that starts with a letter."},
 		{"no description", func(e *catalog.Entry) { e.Description = "  " },
-			at + " has no description in its index. Write one that says what the tool does, what it returns and its limits."},
+			at + " has no description in tools.yaml. Say what the tool does, what it returns and its caps."},
 		{"no mode", func(e *catalog.Entry) { e.Mode = 0 },
-			at + " has no mode of read or write in its index. Set mode to read or write."},
+			at + " needs mode read or write in tools.yaml."},
 		{"no databases", func(e *catalog.Entry) { e.Databases = nil },
-			at + " names no databases in its index. List the databases it runs on."},
+			at + " names no databases in tools.yaml. List the databases it runs on."},
 		{"database twice", func(e *catalog.Entry) { e.Databases = []string{"sales_eu", "sales_eu"} },
-			at + " lists the database sales_eu twice in its index. List each database once."},
+			at + " lists the database sales_eu twice in tools.yaml. List it once."},
 		{"parameter name", func(e *catalog.Entry) { param(e).Name = "Region" },
-			at + ` has parameter $2 named "Region", which is not a valid argument name. Use 1 to 128 lowercase letters, digits and underscores that start with a letter.`},
+			at + ` has parameter $2 named "Region", an invalid argument name. Use snake_case of 1 to 128 characters that starts with a letter.`},
 		{"parameter named database", func(e *catalog.Entry) { param(e).Name = "database" },
-			at + " has parameter $2 named database, which every tool already uses for the database to run on. Rename the parameter in its index."},
+			at + " has parameter $2 named database, which every tool reserves for the database to run on. Rename it in tools.yaml."},
 		{"parameter twice", func(e *catalog.Entry) { param(e).Name = "month" },
-			at + " has more than one parameter named month. Give each parameter its own name in the index."},
+			at + " has more than one parameter named month in tools.yaml. Give each parameter a unique name."},
 		{"parameter description", func(e *catalog.Entry) { param(e).Description = "" },
-			at + " has no description for parameter $2 region in its index. Describe what the agent passes in it."},
+			at + " has no description for parameter $2 region in tools.yaml. Say what the agent passes in it."},
 		{"parameter type", func(e *catalog.Entry) { param(e).Type = "tsvector" },
 			at + ` has parameter $2 region of Postgres type "tsvector", which a tool argument cannot carry. Cast it in the statement to one of bool, bpchar, date, float4, float8, int2, int4, int8, json, jsonb, numeric, text, timestamp, timestamptz, uuid, varchar, such as $2::text.`},
 		{"enum on a number", func(e *catalog.Entry) { param(e).Type = "int4" },
@@ -148,7 +148,7 @@ func TestToolRefusesBadEntries(t *testing.T) {
 		{"negative maxLength", func(e *catalog.Entry) { param(e).MaxLength = ptr(-1) },
 			at + " sets maxLength -1 on parameter $2 region. Set it to 0 or more."},
 		{"pattern does not compile", func(e *catalog.Entry) { param(e).Pattern = "(north" },
-			at + " has a pattern for parameter $2 region that does not compile: error parsing regexp: missing closing ): `(north`. Fix the pattern in its index."},
+			at + " has a pattern for parameter $2 region that does not compile: error parsing regexp: missing closing ): `(north`. Fix the pattern in tools.yaml."},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

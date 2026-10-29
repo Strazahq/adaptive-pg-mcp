@@ -32,7 +32,8 @@ func argsOf(tool string, raw json.RawMessage) (map[string]any, error) {
 	return args, nil
 }
 
-// argsValue decodes one JSON value with json.Number, so that no integer loses digits.
+// argsValue decodes one JSON value with json.Number, so that no integer loses
+// digits.
 func argsValue(raw json.RawMessage) (any, error) {
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.UseNumber()
@@ -41,12 +42,14 @@ func argsValue(raw json.RawMessage) (any, error) {
 	return v, err
 }
 
-// argError is the refusal of a call whose arguments do not match the input schema of tool.
+// argError is the refusal of a call whose arguments do not match the input
+// schema of tool, with why as the reason.
 func argError(tool, why string) error {
-	return errors.New(tool + " refused the call, because " + why + ". Correct the arguments as the input schema of " + tool + " describes them, and call it again.")
+	return errors.New(tool + ": " + why + ".")
 }
 
-// checkArgs checks args against in, the input schema of tool, and names the first mismatch.
+// checkArgs checks args against in, the input schema of tool, and names the
+// first mismatch.
 func checkArgs(tool string, in *jsonschema.Schema, args map[string]any) error {
 	if why := mismatch(in, args, ""); why != "" {
 		return argError(tool, why)
@@ -56,7 +59,7 @@ func checkArgs(tool string, in *jsonschema.Schema, args map[string]any) error {
 
 // mismatch checks v against s, within the part of JSON Schema that the
 // built-in tools and the catalog tools use, and says why v does not match,
-// or answers empty. A string's maxLength counts characters, and its pattern
+// or returns empty. A string's maxLength counts characters, and its pattern
 // matches anywhere in it unless the pattern anchors it, as in JSON Schema.
 // at names v in the sentence, and is empty for the arguments themselves.
 func mismatch(s *jsonschema.Schema, v any, at string) string {
@@ -68,10 +71,10 @@ func mismatch(s *jsonschema.Schema, v any, at string) string {
 		name = "the arguments"
 	}
 	if s.Type != "" && !hasType(v, s.Type) {
-		return name + " must be " + article(s.Type) + ", and the call passed " + kindOf(v)
+		return name + " must be " + article(s.Type) + ", not " + kindOf(v)
 	}
 	if len(s.Enum) > 0 && !slices.Contains(s.Enum, v) {
-		return name + " must be one of " + enumText(s.Enum) + ", and the call passed " + valueText(v)
+		return name + " must be one of " + enumText(s.Enum) + ", not " + valueText(v)
 	}
 	switch x := v.(type) {
 	case string:
@@ -79,24 +82,24 @@ func mismatch(s *jsonschema.Schema, v any, at string) string {
 			return name + " must not be empty"
 		}
 		if n := utf8.RuneCountInString(x); s.MaxLength != nil && n > *s.MaxLength {
-			return name + " must be at most " + plural(int64(*s.MaxLength), "character") + " long, and the call passed " + count(int64(n))
+			return name + " must be at most " + plural(int64(*s.MaxLength), "character") + " long, not " + count(int64(n))
 		}
 		if s.Pattern != "" {
 			if re, err := regexp.Compile(s.Pattern); err != nil || !re.MatchString(x) {
-				return name + " must match the pattern " + s.Pattern + ", and the call passed a string that does not"
+				return name + " must match the pattern " + s.Pattern
 			}
 		}
 	case json.Number:
 		f, _ := x.Float64()
 		if s.Minimum != nil && f < *s.Minimum {
-			return name + " must be at least " + number(*s.Minimum) + ", and the call passed " + x.String()
+			return name + " must be at least " + number(*s.Minimum) + ", not " + x.String()
 		}
 		if s.Maximum != nil && f > *s.Maximum {
-			return name + " must be at most " + number(*s.Maximum) + ", and the call passed " + x.String()
+			return name + " must be at most " + number(*s.Maximum) + ", not " + x.String()
 		}
 	case []any:
 		if s.MinItems != nil && len(x) < *s.MinItems {
-			return name + " must hold at least " + entries(*s.MinItems) + ", and the call passed " + entries(len(x))
+			return name + " must hold at least " + entries(*s.MinItems)
 		}
 		for i, item := range x {
 			if why := mismatch(s.Items, item, at+"["+strconv.Itoa(i)+"]"); why != "" {
@@ -109,7 +112,8 @@ func mismatch(s *jsonschema.Schema, v any, at string) string {
 	return ""
 }
 
-// objectMismatch checks an object against s: its required keys, its closed set of keys, and each value.
+// objectMismatch checks an object against s: its required keys, its closed
+// set of keys, and each value.
 func objectMismatch(s *jsonschema.Schema, x map[string]any, at, name string) string {
 	key := func(k string) string {
 		if at == "" {
@@ -120,9 +124,9 @@ func objectMismatch(s *jsonschema.Schema, x map[string]any, at, name string) str
 	for _, r := range s.Required {
 		if _, ok := x[r]; !ok {
 			if at == "" {
-				return "it needs the argument " + r + ", and the call leaves it out"
+				return "the argument " + r + " is missing"
 			}
-			return name + " needs " + r + ", and the call leaves it out"
+			return name + " is missing " + r
 		}
 	}
 	closed := s.AdditionalProperties != nil && s.AdditionalProperties.Not != nil
@@ -130,9 +134,9 @@ func objectMismatch(s *jsonschema.Schema, x map[string]any, at, name string) str
 		p, known := s.Properties[k]
 		if !known && closed {
 			if at == "" {
-				return "it takes no argument named " + strconv.Quote(k)
+				return "there is no argument " + strconv.Quote(k)
 			}
-			return name + " has the key " + strconv.Quote(k) + ", which it does not take"
+			return name + " takes no key " + strconv.Quote(k)
 		}
 		if !known {
 			p = s.AdditionalProperties
@@ -142,12 +146,13 @@ func objectMismatch(s *jsonschema.Schema, x map[string]any, at, name string) str
 		}
 	}
 	if s.MinProperties != nil && len(x) < *s.MinProperties {
-		return name + " must name at least " + strconv.Itoa(*s.MinProperties) + " column, and the call passed none"
+		return name + " must name at least " + strconv.Itoa(*s.MinProperties) + " column"
 	}
 	return ""
 }
 
-// hasType reports whether v, decoded with json.Number, has the JSON Schema type t.
+// hasType reports whether v, decoded with json.Number, has the JSON Schema
+// type t.
 func hasType(v any, t string) bool {
 	switch t {
 	case "string":
@@ -227,7 +232,8 @@ func valueText(v any) string {
 	return kindOf(v)
 }
 
-// number writes a bound of a schema, such as 1,000 for a whole number and 0.5 for one with a fraction.
+// number writes a bound of a schema, such as 1,000 for a whole number and 0.5
+// for one with a fraction.
 func number(f float64) string {
 	if f == math.Trunc(f) && math.Abs(f) < 1e15 {
 		return count(int64(f))

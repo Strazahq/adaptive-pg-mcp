@@ -59,7 +59,7 @@ func TestARowOverTheByteCapIsNotDecoded(t *testing.T) {
 			if rows, _ := m["rows"].([]any); len(rows) != 0 || m["truncated"] != true {
 				t.Errorf("query_sql of a 16 MiB value at a byte cap of 1 MiB answered %d rows and truncated %v, want none and true", len(rows), m["truncated"])
 			}
-			want := "query_sql answered 0 rows from helpdesk. More rows follow, and the answer stopped before the next row, because it would pass the byte cap of 1,048,576 bytes. Add a LIMIT, or select fewer columns."
+			want := "query_sql returned 0 rows from helpdesk. More rows exist beyond the byte cap of 1,048,576 bytes. Add a LIMIT, or select fewer columns."
 			if got := textOf(t, res); got != want {
 				t.Errorf("text:\n got %s\nwant %s", got, want)
 			}

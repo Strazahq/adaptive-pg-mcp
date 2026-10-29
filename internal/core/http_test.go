@@ -19,7 +19,7 @@ import (
 
 // whoami is a test tool that answers the caller of its own request.
 func whoami(s *Server) {
-	s.mcp.AddTool(&mcp.Tool{Name: "whoami", Description: "Answers the caller of the request.", InputSchema: &jsonschema.Schema{Type: "object"}},
+	s.mcp.AddTool(&mcp.Tool{Name: "whoami", Description: "Returns the caller of the request.", InputSchema: &jsonschema.Schema{Type: "object"}},
 		func(ctx context.Context, _ *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			caller, _ := callerFrom(ctx)
 			return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: caller}}}, nil
@@ -205,7 +205,7 @@ func TestTokenCheckOnEveryRevision(t *testing.T) {
 					t.Fatalf("the opening request answered %d, want %d: %s", a.status, c.status, a.body)
 				}
 				if c.status == http.StatusUnauthorized {
-					if !strings.HasPrefix(a.header.Get("WWW-Authenticate"), "Bearer ") || !strings.Contains(a.body, "adaptive-pg-mcp refused it") {
+					if !strings.HasPrefix(a.header.Get("WWW-Authenticate"), "Bearer ") || !strings.Contains(a.body, "bearer token") {
 						t.Errorf("the refusal has challenge %q and body %q", a.header.Get("WWW-Authenticate"), a.body)
 					}
 					return
@@ -291,7 +291,7 @@ func TestSessionIsBoundToItsCaller(t *testing.T) {
 }
 
 func TestOriginAndHost(t *testing.T) {
-	const refused = "the request comes from a web page, as its Origin header shows, and adaptive-pg-mcp serves no web page, so it refused the request. Call the server from an MCP client that sends no Origin header.\n"
+	const refused = "the request has an Origin header, so it comes from a web page, and web pages may not call this server. Use an MCP client that sends no Origin header.\n"
 	url := serve(t, New(standaloneConfig(), slog.New(slog.DiscardHandler)))
 	v := mcp.SupportedProtocolVersions()[0]
 	for _, origin := range []string{"https://attacker.example", "http://127.0.0.1:8080", "null"} {

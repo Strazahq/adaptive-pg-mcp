@@ -153,12 +153,12 @@ tools:
 `,
 	}
 	want := []Finding{
-		reports("finance/revenue.sql statement revenue_draft is not a tool, because finance/tools.yaml has no entry for it. Add an entry to serve it."),
-		reports("finance/tools.yaml entry revenue_months raises limits.rows to 5,000, above the 1,000 that server.yaml sets, so its calls may go past the cap of the built-in tools. Lower it in the entry if that is not intended."),
-		reports("finance/tools.yaml entry revenue_months raises limits.timeout to 2m0s, above the 30s that server.yaml sets, so its calls may go past the cap of the built-in tools. Lower it in the entry if that is not intended."),
-		refuses(`finance/revenue.sql statement revenue_by_region does not prepare on sales_us: the server answered: column "net" does not exist (SQLSTATE 42703). Fix the statement or remove sales_us from its databases.`),
-		refuses("finance/revenue.sql statement revenue_of_region takes 2 parameters on sales_eu, and its index lists 1. List each parameter of the statement in params, in $1 order."),
-		refuses("finance/revenue.sql statement tickets_since has parameter $1 after of type int4 on sales_eu and of type int8 on sales_us, and a tool argument takes one type. Make the types match, or cast the parameter in the statement, such as $1::int4."),
+		reports("finance/revenue.sql statement revenue_draft is not a tool, because finance/tools.yaml does not list it. List it there to serve it."),
+		reports("finance/tools.yaml: the catalog tool revenue_months raises limits.rows to 5,000, above the 1,000 in server.yaml. Lower it if that is not intended."),
+		reports("finance/tools.yaml: the catalog tool revenue_months raises limits.timeout to 2m0s, above the 30s in server.yaml. Lower it if that is not intended."),
+		refuses(`finance/revenue.sql statement revenue_by_region does not prepare on sales_us: Postgres said: column "net" does not exist (SQLSTATE 42703). Fix the statement, or remove sales_us from its databases.`),
+		refuses("finance/revenue.sql statement revenue_of_region takes 2 parameters on sales_eu, but tools.yaml lists 1. List each parameter in params, in $1 order."),
+		refuses("finance/revenue.sql statement tickets_since has parameter $1 (after) as int4 on sales_eu and as int8 on sales_us. Make the types match, or cast it in the statement, such as $1::int4."),
 		refuses(`finance/revenue.sql statement tickets_by_ids has parameter $1 ids of Postgres type "_int4", which a tool argument cannot carry. Cast it in the statement to one of bool, bpchar, date, float4, float8, int2, int4, int8, json, jsonb, numeric, text, timestamp, timestamptz, uuid, varchar, such as $1::text.`),
 		refuses(`finance/revenue.sql statement tickets_by_mood has parameter $1 feeling of Postgres type "public.mood", which a tool argument cannot carry. Cast it in the statement to one of bool, bpchar, date, float4, float8, int2, int4, int8, json, jsonb, numeric, text, timestamp, timestamptz, uuid, varchar, such as $1::text.`),
 	}
@@ -229,7 +229,7 @@ SELECT current_setting('application_name') AS name
 	"helpdesk/tools.yaml": `version: 1
 tools:
   tickets_by_status:
-    description: Lists the tickets of one status, up to an id. Answers id, status and note per ticket, at most 5 rows.
+    description: Lists the tickets of one status, up to an id. Returns id, status and note per ticket, at most 5 rows.
     mode: read
     databases: [helpdesk]
     login: read
@@ -242,7 +242,7 @@ tools:
         description: The highest id to answer, or none for every id.
     limits: { rows: 5 }
   add_note:
-    description: Sets the note of one ticket. Answers the ticket's id and note.
+    description: Sets the note of one ticket. Returns the ticket's id and note.
     mode: write
     databases: [helpdesk]
     login: write
@@ -254,7 +254,7 @@ tools:
         description: The note, at most 10 characters.
         required: true
   notes_equal:
-    description: Lists the tickets whose note is the given one. Answers their ids.
+    description: Lists the tickets whose note is the given one. Returns their ids.
     mode: read
     databases: [helpdesk]
     login: read
@@ -263,7 +263,7 @@ tools:
         description: The note.
         required: true
   close_tickets:
-    description: Closes the open tickets up to an id. Answers rowsAffected, and changes at most 10 rows.
+    description: Closes the open tickets up to an id. Returns rowsAffected, and changes at most 10 rows.
     mode: write
     databases: [helpdesk]
     login: write
@@ -274,7 +274,7 @@ tools:
         minimum: 1
     limits: { write_rows: 10 }
   ledger_total:
-    description: Sums the ledger. Answers the login it ran on and the total.
+    description: Sums the ledger. Returns the login it ran on and the total.
     mode: read
     databases: [helpdesk]
     login: finance_reader
@@ -293,24 +293,24 @@ tools:
     databases: [helpdesk]
     login: write
   ticket_page:
-    description: Lists the tickets by id. Answers id and status per ticket, at most 30 bytes.
+    description: Lists the tickets by id. Returns id and status per ticket, at most 30 bytes.
     mode: read
     databases: [helpdesk]
     login: read
     limits: { bytes: 30 }
   slow_count:
-    description: Counts the tickets after a sleep that passes its own timeout. Answers one row.
+    description: Counts the tickets after a sleep that passes its own timeout. Returns one row.
     mode: read
     databases: [helpdesk]
     login: read
     limits: { timeout: 200ms }
   rename_session:
-    description: Changes the application name of its session. Answers the new name.
+    description: Changes the application name of its session. Returns the new name.
     mode: read
     databases: [helpdesk]
     login: read
   session_name:
-    description: Reads the application name of its session. Answers the name.
+    description: Reads the application name of its session. Returns the name.
     mode: read
     databases: [helpdesk]
     login: read
@@ -323,13 +323,13 @@ func TestCatalogTools(t *testing.T) {
 		args       map[string]any
 		want       string
 	}{
-		{"a value its domain refuses", "add_note", map[string]any{"id": 2, "note": "fifteen letters"}, `add_note on helpdesk failed, because the server answered: value for domain tiny_note violates check constraint "tiny_note_check" (SQLSTATE 23514), so nothing was changed. Correct the call as the reason says, and call it again.`},
-		{"a write over its own cap", "close_tickets", map[string]any{"up_to": 50}, "close_tickets on helpdesk would change 50 rows and the cap is 10, so nothing was changed. Narrow the call through its arguments, or ask an administrator to raise limits.write_rows of close_tickets in the catalog."},
-		{"a read past its own timeout", "slow_count", map[string]any{}, "slow_count on helpdesk failed, because the server answered: canceling statement due to statement timeout (SQLSTATE 57014), so nothing was read. A statement may run for 200ms, so narrow the call, or ask an administrator to raise limits.timeout of slow_count in the catalog."},
-		{"mode read runs read-only on any login", "reopen_in_a_read", map[string]any{"id": 1}, "reopen_in_a_read on helpdesk failed, because the server answered: cannot execute UPDATE in a read-only transaction (SQLSTATE 25006), so nothing was read. Correct the call as the reason says, and call it again."},
-		{"a write that changes structure", "wipe_ledger", map[string]any{}, "wipe_ledger on helpdesk ran a statement whose command tag is SELECT 1 and that changed structure, as the system catalogs show, so it was rolled back and nothing was changed. A catalog tool may change rows only, so ask an administrator to change the statement in the catalog."},
-		{"an argument outside its enum", "tickets_by_status", map[string]any{"status": "lost"}, `tickets_by_status refused the call, because the argument status must be one of "open", "closed" and "pending", and the call passed "lost". Correct the arguments as the input schema of tickets_by_status describes them, and call it again.`},
-		{"an argument below its minimum", "close_tickets", map[string]any{"up_to": 0}, "close_tickets refused the call, because the argument up_to must be at least 1, and the call passed 0. Correct the arguments as the input schema of close_tickets describes them, and call it again."},
+		{"a value its domain refuses", "add_note", map[string]any{"id": 2, "note": "fifteen letters"}, `add_note on helpdesk changed nothing, because Postgres said: value for domain tiny_note violates check constraint "tiny_note_check" (SQLSTATE 23514). Correct the call and try again.`},
+		{"a write over its own cap", "close_tickets", map[string]any{"up_to": 50}, "close_tickets on helpdesk would change 50 rows, over the cap of 10, and changed nothing. Narrow the call through its arguments, or ask an administrator to raise limits.write_rows of close_tickets in tools.yaml."},
+		{"a read past its own timeout", "slow_count", map[string]any{}, "slow_count on helpdesk failed, because Postgres said: canceling statement due to statement timeout (SQLSTATE 57014). The timeout is 200ms. Narrow the call, or ask an administrator to raise limits.timeout of slow_count in tools.yaml."},
+		{"mode read runs read-only on any login", "reopen_in_a_read", map[string]any{"id": 1}, "reopen_in_a_read on helpdesk failed, because Postgres said: cannot execute UPDATE in a read-only transaction (SQLSTATE 25006). Correct the call and try again."},
+		{"a write that changes structure", "wipe_ledger", map[string]any{}, "wipe_ledger on helpdesk rolled back the statement with command tag SELECT 1, because it changed the system catalogs. A catalog tool may change rows only. Ask an administrator to change the statement."},
+		{"an argument outside its enum", "tickets_by_status", map[string]any{"status": "lost"}, `tickets_by_status: the argument status must be one of "open", "closed" and "pending", not "lost".`},
+		{"an argument below its minimum", "close_tickets", map[string]any{"up_to": 0}, "close_tickets: the argument up_to must be at least 1, not 0."},
 	}
 	firstFive := `[[1,"open",null],[2,"open",null],[3,"open",null],[4,"open",null],[5,"open",null]]`
 	for _, s := range pgtest.Servers(t) {
@@ -387,7 +387,7 @@ func TestCatalogTools(t *testing.T) {
 			}
 			t.Run("the id check runs on the call's own transaction", func(t *testing.T) {
 				res := callTool(t, cs, "close_tickets", helpdesk(map[string]any{"up_to": 9}), mcp.Meta{objectIDKey: idOf(t, other, "helpdesk")})
-				want := "the id of helpdesk differs from the one Straza listed, so the call is refused. The database was dropped and created again, or server.yaml now gives its name to another database. Try again once Straza lists the databases again, or ask an administrator to refresh the list."
+				want := "the id of helpdesk differs from the one Straza listed: the database was recreated, or server.yaml now gives its name to another database. Try again after Straza lists the databases again, or ask an administrator to refresh the list."
 				if got := textOf(t, res); !res.IsError || got != want {
 					t.Errorf("close_tickets with the id of another database answered %v:\n got %s\nwant %s", res.IsError, got, want)
 				}
@@ -401,16 +401,16 @@ func TestCatalogTools(t *testing.T) {
 				truncated, changed any
 			}{
 				{"a read with every argument", "tickets_by_status", map[string]any{"status": "open", "max_id": 3}, nil,
-					`[[1,"open",null],[2,"open",null],[3,"open",null]]`, "tickets_by_status answered 3 rows from helpdesk.", false, nil},
+					`[[1,"open",null],[2,"open",null],[3,"open",null]]`, "tickets_by_status returned 3 rows from helpdesk.", false, nil},
 				{"a read without its optional argument stops at its own row cap", "tickets_by_status", map[string]any{"status": "open"}, nil,
-					firstFive, "tickets_by_status answered 5 rows from helpdesk. More rows follow, and the answer stopped at the row cap of 5. Narrow the call through its arguments, or ask an administrator to raise the limits of tickets_by_status in the catalog.", true, nil},
+					firstFive, "tickets_by_status returned 5 rows from helpdesk. More rows exist beyond the row cap of 5. Narrow the call through its arguments, or ask an administrator to raise the caps of tickets_by_status in the catalog.", true, nil},
 				{"a write through a parameter of a domain type", "add_note", map[string]any{"id": 1, "note": "printer"}, nil,
-					`[[1,"printer"]]`, "add_note changed 1 row on helpdesk and answered 1 row.", nil, 1.0},
+					`[[1,"printer"]]`, "add_note changed 1 row on helpdesk and returned 1 row.", nil, 1.0},
 				{"a read through a parameter cast to a domain", "notes_equal", map[string]any{"note": "printer"}, nil, `[[1]]`, "", false, nil},
 				{"a read stops at its own byte cap", "ticket_page", map[string]any{}, nil, `[[1,"open"],[2,"open"],[3,"open"]]`,
-					"ticket_page answered 3 rows from helpdesk. More rows follow, and the answer stopped before the next row, because it would pass the byte cap of 30 bytes. Narrow the call through its arguments, or ask an administrator to raise the limits of ticket_page in the catalog.", true, nil},
+					"ticket_page returned 3 rows from helpdesk. More rows exist beyond the byte cap of 30 bytes. Narrow the call through its arguments, or ask an administrator to raise the caps of ticket_page in the catalog.", true, nil},
 				{"a write under its own cap, with the right id", "close_tickets", map[string]any{"up_to": 4}, mcp.Meta{objectIDKey: idOf(t, d, "helpdesk")},
-					`[]`, "close_tickets changed 4 rows on helpdesk and answered 0 rows.", nil, 4.0},
+					`[]`, "close_tickets changed 4 rows on helpdesk and returned 0 rows.", nil, 4.0},
 				{"a read on a login other than read or write", "ledger_total", map[string]any{}, nil, `[["` + finance.Name + `",15]]`, "", false, nil},
 			}
 			for _, c := range answers {
@@ -454,15 +454,15 @@ func TestCatalogTools(t *testing.T) {
 func TestCatalogToolsInStandaloneMode(t *testing.T) {
 	files := map[string]string{
 		"helpdesk/tickets.sql": "-- name: open_tickets\nSELECT id FROM tickets WHERE status = 'open' ORDER BY id\n",
-		"helpdesk/tools.yaml":  "version: 1\ntools:\n  open_tickets:\n    description: Lists the open tickets. Answers one row per ticket.\n    mode: read\n    databases: [helpdesk]\n    login: read\n",
+		"helpdesk/tools.yaml":  "version: 1\ntools:\n  open_tickets:\n    description: Lists the open tickets. Returns one row per ticket.\n    mode: read\n    databases: [helpdesk]\n    login: read\n",
 	}
 	a, b := hashOf(tokenA), hashOf(tokenB)
 	access := "version: 1\ncallers:\n" +
 		"  - name: support_bot\n    token_sha256: \"" + hex.EncodeToString(a[:]) + "\"\n    tools: [open_tickets, open_ticket, execute_sql, read_rows, open_ticket]\n    databases: [helpdesk]\n    tables: [public.tickets]\n" +
 		"  - name: ops_bot\n    token_sha256: \"" + hex.EncodeToString(b[:]) + "\"\n    tools: [read_rows]\n    databases: [helpdesk]\n"
 	want := []Finding{
-		reports("support_bot lists open_ticket in its tools in access.yaml, and adaptive-pg-mcp serves no built-in tool or catalog tool of that name, so the entry gives it nothing. Correct the name, or remove it from the tools of support_bot."),
-		reports("support_bot lists execute_sql in its tools in access.yaml, and free_sql read leaves execute_sql out, so the entry gives it nothing. Set free_sql to read-write to serve execute_sql, or remove it from the tools of support_bot."),
+		reports("support_bot lists open_ticket in access.yaml, but no built-in or catalog tool has that name. Correct the name, or remove it from the tools of support_bot."),
+		reports("support_bot lists execute_sql in access.yaml, but free_sql is read, which does not serve it. Set free_sql to read-write, or remove execute_sql from the tools of support_bot."),
 	}
 	for _, s := range pgtest.Servers(t) {
 		t.Run(s.String(), func(t *testing.T) {
@@ -491,7 +491,7 @@ func TestCatalogToolsInStandaloneMode(t *testing.T) {
 				t.Errorf("ops_bot, whose entry does not list open_tickets, sees it in tools/list")
 			}
 			res = callTool(t, ops, "open_tickets", map[string]any{"database": "helpdesk"}, nil)
-			refused := "ops_bot may not use open_tickets, because its entry in access.yaml does not list that tool, so the call is refused. Use a tool that its entry lists, or ask an administrator to add open_tickets to its tools."
+			refused := "access.yaml does not list open_tickets for ops_bot. Use a listed tool, or ask an administrator to add it."
 			if got := textOf(t, res); !res.IsError || got != refused {
 				t.Errorf("ops_bot's open_tickets answered %v:\n got %s\nwant %s", res.IsError, got, refused)
 			}

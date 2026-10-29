@@ -11,17 +11,20 @@ import (
 	"github.com/strazahq/adaptive-pg-mcp/internal/config"
 )
 
-// testDatabases are the databases of server.yaml that the load tests check entries against.
+// testDatabases are the databases of server.yaml that the load tests check
+// tools against.
 var testDatabases = map[string]config.Database{
 	"helpdesk": {Logins: map[string]config.Login{"read": {Env: "HELPDESK_READ_DSN"}, "write": {Env: "HELPDESK_WRITE_DSN"}}},
 	"sales_eu": {Logins: map[string]config.Login{"read": {Env: "SALES_EU_DSN"}, "write": {Env: "SALES_EU_DSN"}}},
 	"sales_us": {Logins: map[string]config.Login{"read": {Env: "SALES_US_READ_DSN"}, "write": {Env: "SALES_US_WRITE_DSN"}, "finance_reader": {Env: "SALES_US_FINANCE_DSN"}}},
 }
 
-// testBuiltins stand for the names of the built-in tools, which no entry may take.
+// testBuiltins stand for the built-in tool names, which no catalog tool may
+// take.
 var testBuiltins = []string{"list_databases", "query_sql"}
 
-// writeTree writes each file of files under dir, with its folders, and returns dir.
+// writeTree writes each file of files under dir, with its folders, and
+// returns dir.
 func writeTree(t *testing.T, dir string, files map[string]string) string {
 	t.Helper()
 	for name, text := range files {
@@ -42,7 +45,7 @@ func TestLoadReadsTheCatalog(t *testing.T) {
 	dir := writeTree(t, t.TempDir(), map[string]string{
 		"notes.md":         "The catalog of the example organization.\n",
 		"shared.sql":       "\ufeff-- name: ping\nSELECT 1\n",
-		"tools.yaml":       "version: 1\ntools:\n  ping:\n    description: Answers one row with the number 1.\n    mode: read\n    databases: [helpdesk]\n    login: read\n",
+		"tools.yaml":       "version: 1\ntools:\n  ping:\n    description: Returns one row with the number 1.\n    mode: read\n    databases: [helpdesk]\n    login: read\n",
 		"drafts/ideas.sql": "-- name: churn_guess\nSELECT 1\n",
 		"finance/revenue.sql": `-- Revenue statements of the finance team.
 /* A header in a block comment,
@@ -111,7 +114,7 @@ tools:
 		t.Errorf("Load through a symbolic link to the folder answered %d entries and %d reports (%v), want what the folder itself answers", len(linked), len(linkedReports), err)
 	}
 	want := []Entry{
-		{Name: "ping", Description: "Answers one row with the number 1.", Mode: Read, Databases: []string{"helpdesk"}, Login: "read", SQL: "SELECT 1", Source: "shared.sql"},
+		{Name: "ping", Description: "Returns one row with the number 1.", Mode: Read, Databases: []string{"helpdesk"}, Login: "read", SQL: "SELECT 1", Source: "shared.sql"},
 		{Name: "margin_by_region", Description: "Sums the margin per region. One row per region.", Mode: Read, Databases: []string{"sales_us"}, Login: "finance_reader",
 			SQL: "SELECT region, sum(margin) FROM margins GROUP BY region", Source: "finance/margin.sql"},
 		{Name: "revenue_by_region", Description: "Sums net revenue per region for one month. One row per region.", Mode: Read, Databases: []string{"sales_eu", "sales_us"}, Login: "read",
@@ -130,15 +133,15 @@ tools:
 		t.Errorf("Load answered the entries\n%#v\nwant\n%#v", entries, want)
 	}
 	wantReports := []string{
-		"drafts/ideas.sql statement churn_guess is not a tool, because drafts/tools.yaml has no entry for it. Add an entry to serve it.",
-		"finance/revenue.sql statement revenue_draft is not a tool, because finance/tools.yaml has no entry for it. Add an entry to serve it.",
+		"drafts/ideas.sql statement churn_guess is not a tool, because drafts/tools.yaml does not list it. List it there to serve it.",
+		"finance/revenue.sql statement revenue_draft is not a tool, because finance/tools.yaml does not list it. List it there to serve it.",
 	}
 	if !reflect.DeepEqual(reports, wantReports) {
 		t.Errorf("Load reported\n%s\nwant\n%s", strings.Join(reports, "\n"), strings.Join(wantReports, "\n"))
 	}
 }
 
-// okIndex is a finance/tools.yaml whose one entry joins the statement of okSQL.
+// okIndex is a finance/tools.yaml whose one tool uses the statement of okSQL.
 const okIndex = `version: 1
 tools:
   revenue_by_region:
@@ -154,7 +157,8 @@ tools:
 // okSQL is a finance/revenue.sql with the one statement of okIndex.
 const okSQL = "-- name: revenue_by_region\nSELECT $1::date\n"
 
-// edit returns text with old replaced by new once, and fails the test when text does not hold old.
+// edit returns text with old replaced by new once, and fails the test when
+// text does not hold old.
 func edit(t *testing.T, text, old, new string) string {
 	t.Helper()
 	if !strings.Contains(text, old) {
@@ -165,8 +169,8 @@ func edit(t *testing.T, text, old, new string) string {
 
 func TestLoadFailures(t *testing.T) {
 	const month = "  revenue_by_month:\n    description: Sums net revenue for one month.\n    mode: read\n    databases: [sales_eu]\n    login: read\n"
-	noStatement := "finance/tools.yaml entry revenue_by_month has no statement of that name in the .sql files of its folder, so it cannot be a tool. Add a -- name: revenue_by_month line before its statement in a .sql file next to finance/tools.yaml, or remove the entry."
-	at := "finance/tools.yaml entry revenue_by_region"
+	noStatement := "finance/tools.yaml tool revenue_by_month has no statement in the .sql files of its folder. Add a -- name: revenue_by_month line above its statement in a .sql file next to finance/tools.yaml, or remove the tool."
+	at := "finance/tools.yaml tool revenue_by_region"
 	cases := []struct {
 		name  string
 		files map[string]string
@@ -175,67 +179,67 @@ func TestLoadFailures(t *testing.T) {
 		{"an entry without a statement", map[string]string{"finance/tools.yaml": okIndex + month}, noStatement},
 		{"an entry whose statement is in a folder below", map[string]string{"finance/tools.yaml": okIndex + month, "finance/q3/month.sql": "-- name: revenue_by_month\nSELECT 1\n"}, noStatement},
 		{"two statements with one name in two files", map[string]string{"sales/revenue.sql": "-- A copy.\n\n-- name: revenue_by_region\nSELECT 2\n"},
-			"finance/revenue.sql line 1 and sales/revenue.sql line 3 both name a statement revenue_by_region, and a tool name must be unique in the catalog. Rename one of them in its -- name: line."},
+			"finance/revenue.sql line 1 and sales/revenue.sql line 3 both name a statement revenue_by_region. Rename one of them in its -- name: line."},
 		{"two statements with one name in one file", map[string]string{"finance/revenue.sql": okSQL + "\n-- name: revenue_by_region\nSELECT 2\n"},
-			"finance/revenue.sql line 1 and finance/revenue.sql line 4 both name a statement revenue_by_region, and a tool name must be unique in the catalog. Rename one of them in its -- name: line."},
+			"finance/revenue.sql line 1 and finance/revenue.sql line 4 both name a statement revenue_by_region. Rename one of them in its -- name: line."},
 		{"two statements with one name, one of them not indexed", map[string]string{"drafts/old.sql": "-- name: revenue_by_region\nSELECT 3\n"},
-			"drafts/old.sql line 1 and finance/revenue.sql line 1 both name a statement revenue_by_region, and a tool name must be unique in the catalog. Rename one of them in its -- name: line."},
+			"drafts/old.sql line 1 and finance/revenue.sql line 1 both name a statement revenue_by_region. Rename one of them in its -- name: line."},
 		{"the name of a built-in tool", map[string]string{
 			"finance/revenue.sql": okSQL + "\n-- name: query_sql\nSELECT 1\n",
 			"finance/tools.yaml":  okIndex + "  query_sql:\n    description: Runs SQL.\n    mode: read\n    databases: [sales_eu]\n    login: read\n",
-		}, "finance/tools.yaml entry query_sql has the name of a built-in tool of adaptive-pg-mcp, and a tool name must be unique on the server. Rename the entry and its -- name: line in finance/revenue.sql."},
+		}, "finance/tools.yaml tool query_sql has the name of a built-in tool. Rename it, and its -- name: line in finance/revenue.sql."},
 		{"a database that server.yaml does not define", map[string]string{"finance/tools.yaml": edit(t, okIndex, "[sales_eu]", "[sales_eu, sales_apac]")},
 			at + " names the database sales_apac, which server.yaml does not define. Remove sales_apac from its databases, or add it to databases in server.yaml."},
 		{"a login that one of its databases does not have", map[string]string{"finance/tools.yaml": edit(t, edit(t, okIndex, "[sales_eu]", "[sales_us, sales_eu]"), "login: read", "login: finance_reader")},
-			at + " runs on the login finance_reader, which sales_eu does not have in server.yaml. Add finance_reader to the logins of sales_eu, or set login to a login it has, such as read."},
+			at + " uses the login finance_reader, which sales_eu does not have in server.yaml. Add finance_reader to the logins of sales_eu, or set login to one it has, such as read."},
 		{"no login", map[string]string{"finance/tools.yaml": edit(t, okIndex, "    login: read\n", "")},
-			at + " does not set login, which names the login its statement runs on. Add login: read, login: write, or the name of another login of its databases."},
+			at + " does not set login. Set login to read, write or another login of its databases."},
 		{"no mode", map[string]string{"finance/tools.yaml": edit(t, okIndex, "    mode: read\n", "")},
 			at + " does not set mode. Set mode to read or write."},
 		{"a mode that is neither read nor write", map[string]string{"finance/tools.yaml": edit(t, okIndex, "mode: read", "mode: delete")},
-			at + " has mode delete, which is neither read nor write. Set mode to read or write."},
+			at + " has mode delete. Set mode to read or write."},
 		{"no databases", map[string]string{"finance/tools.yaml": edit(t, okIndex, "[sales_eu]", "[]")},
-			at + " names no databases. List the databases it runs on, by their names in server.yaml."},
+			at + " lists no databases. List the databases it runs on, by their names in server.yaml."},
 		{"an entry without keys", map[string]string{"finance/tools.yaml": "version: 1\ntools:\n  revenue_by_region:\n"},
 			at + " does not set mode. Set mode to read or write."},
 		{"a row limit below 1", map[string]string{"finance/tools.yaml": okIndex + "    limits: { rows: 0 }\n"},
-			at + " has limits.rows 0, and it must be 1 or more. Set it to 1 or more, or leave it out to keep the limit of server.yaml."},
+			at + " has limits.rows 0. Set it to 1 or more, or remove it to keep the cap of server.yaml."},
 		{"a write limit below 1", map[string]string{"finance/tools.yaml": okIndex + "    limits: { write_rows: -5 }\n"},
-			at + " has limits.write_rows -5, and it must be 1 or more. Set it to 1 or more, or leave it out to keep the limit of server.yaml."},
+			at + " has limits.write_rows -5. Set it to 1 or more, or remove it to keep the cap of server.yaml."},
 		{"a timeout that is not a duration", map[string]string{"finance/tools.yaml": okIndex + "    limits: { timeout: soon }\n"},
 			at + " has limits.timeout soon, which is not a duration. Write it with a unit, such as 30s."},
 		{"a timeout of zero", map[string]string{"finance/tools.yaml": okIndex + "    limits: { timeout: 0s }\n"},
-			at + " has limits.timeout 0s, and it must be longer than zero. Set it to the statement timeout of each call, such as 30s, or leave it out to keep the timeout of server.yaml."},
+			at + " has limits.timeout 0s. Set it above zero, such as 30s, or remove it to keep the timeout of server.yaml."},
 		{"SQL before the first name line", map[string]string{"finance/revenue.sql": "-- Revenue.\n\nSELECT 1;\n" + okSQL},
-			"finance/revenue.sql line 3 holds SQL before the first -- name: line, so it belongs to no tool. Put a -- name: line before it, or remove it."},
+			"finance/revenue.sql line 3 has SQL before the first -- name: line. Add a -- name: line above it, or remove it."},
 		{"SQL in a file without a name line", map[string]string{"finance/notes.sql": "/* notes */ SELECT 1;\n"},
-			"finance/notes.sql line 1 holds SQL before the first -- name: line, so it belongs to no tool. Put a -- name: line before it, or remove it."},
+			"finance/notes.sql line 1 has SQL before the first -- name: line. Add a -- name: line above it, or remove it."},
 		{"a block comment that never closes before the first name line", map[string]string{"finance/revenue.sql": "/* draft\n" + okSQL},
-			"finance/revenue.sql line 1 holds SQL before the first -- name: line, so it belongs to no tool. Put a -- name: line before it, or remove it."},
+			"finance/revenue.sql line 1 has SQL before the first -- name: line. Add a -- name: line above it, or remove it."},
 		{"a name line without a name", map[string]string{"finance/revenue.sql": okSQL + "-- name:\nSELECT 2\n"},
-			"finance/revenue.sql line 3 has a -- name: line without a name. Write the tool name after it, such as -- name: revenue_by_region."},
+			"finance/revenue.sql line 3 has a -- name: line without a name. Add the tool name, such as -- name: revenue_by_region."},
 		{"a statement without SQL", map[string]string{"finance/revenue.sql": "-- name: revenue_by_region\n-- only a comment\n/* and another */\n\n"},
-			"finance/revenue.sql statement revenue_by_region on line 1 holds no SQL, only comments or blank lines. Write the statement below its -- name: line, or remove the line."},
+			"finance/revenue.sql statement revenue_by_region on line 1 has no SQL. Write the statement below its -- name: line, or remove the line."},
 		{"a statement that starts with a semicolon after a comment", map[string]string{"finance/revenue.sql": "-- name: revenue_by_region\n-- the monthly sum\n /* of net */ ;SELECT region FROM revenue\n"},
-			"finance/revenue.sql statement revenue_by_region on line 1 starts with a semicolon, which would cut the statement off from the EXPLAIN that the start checks put before it to check its grants. Remove the semicolon at the start of the statement."},
+			"finance/revenue.sql statement revenue_by_region on line 1 starts with a semicolon, which would split it from the EXPLAIN that checks its grants. Remove the semicolon."},
 		{"a statement that starts with a semicolon after a comment that ends in a carriage return", map[string]string{"finance/revenue.sql": "-- name: revenue_by_region\n-- the monthly sum\r;SELECT region FROM revenue\n"},
-			"finance/revenue.sql statement revenue_by_region on line 1 starts with a semicolon, which would cut the statement off from the EXPLAIN that the start checks put before it to check its grants. Remove the semicolon at the start of the statement."},
+			"finance/revenue.sql statement revenue_by_region on line 1 starts with a semicolon, which would split it from the EXPLAIN that checks its grants. Remove the semicolon."},
 		{"an unknown key in an entry", map[string]string{"finance/tools.yaml": edit(t, okIndex, "    login: read\n", "    login: read\n    owner: finance\n")},
-			"finance/tools.yaml line 8 has the key owner, which this build does not read. Remove it, or correct its spelling."},
+			"finance/tools.yaml line 8 has the unknown key owner. Remove it, or fix its spelling."},
 		{"an unknown key in a parameter", map[string]string{"finance/tools.yaml": okIndex + "        default: 2026-09-01\n"},
-			"finance/tools.yaml line 11 has the key default, which this build does not read. Remove it, or correct its spelling."},
+			"finance/tools.yaml line 11 has the unknown key default. Remove it, or fix its spelling."},
 		{"an unknown key in the limits", map[string]string{"finance/tools.yaml": okIndex + "    limits: { rows: 10, cap: 5 }\n"},
-			"finance/tools.yaml line 11 has the key cap, which this build does not read. Remove it, or correct its spelling."},
+			"finance/tools.yaml line 11 has the unknown key cap. Remove it, or fix its spelling."},
 		{"a minimum that is not a number", map[string]string{"finance/tools.yaml": okIndex + "        minimum: low\n"},
 			"finance/tools.yaml line 11 has a value of the wrong type, where a number belongs. Write a number there."},
 		{"an entry written twice", map[string]string{"finance/tools.yaml": okIndex + "  revenue_by_region:\n    mode: read\n"},
-			"finance/tools.yaml line 11 sets the key revenue_by_region a second time in one place. Keep one of the two."},
+			"finance/tools.yaml line 11 repeats the key revenue_by_region. Keep one of the two."},
 		{"another version", map[string]string{"finance/tools.yaml": edit(t, okIndex, "version: 1", "version: 2")},
-			"finance/tools.yaml has version 2, and this build reads version 1 only. Write the file in version 1, or run a build that reads version 2."},
+			"finance/tools.yaml has version 2, but this build reads only version 1. Write the file in version 1, or run a build that reads version 2."},
 		{"a second document", map[string]string{"finance/tools.yaml": okIndex + "---\nversion: 1\n"},
-			"finance/tools.yaml holds a second YAML document from line 11, which adaptive-pg-mcp would ignore, because it reads one document per file. Keep one document per file."},
+			"finance/tools.yaml has a second YAML document at line 11. Remove it, because adaptive-pg-mcp reads only the first."},
 		{"no version", map[string]string{"finance/tools.yaml": edit(t, okIndex, "version: 1\n", "")},
-			"finance/tools.yaml does not set version, which names the format the file is written in. Add version: 1."},
+			"finance/tools.yaml does not set version. Add version: 1."},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -263,10 +267,11 @@ func TestLoadRefusesAFolderItCannotRead(t *testing.T) {
 		t.Fatal(err)
 	}
 	cases := []struct{ name, dir, want string }{
-		{"a folder that does not exist", missing, "adaptive-pg-mcp cannot read the catalog folder at " + missing + ", which server.yaml names in catalog: " + statErr.Error() + ". Create the folder, correct the path in catalog, or set catalog: none."},
-		{"a file instead of a folder", file, "the catalog folder at " + file + ", which server.yaml names in catalog, is a file and not a folder. Point catalog at the folder that holds the .sql files and their tools.yaml, or set catalog: none."},
+		{"a folder that does not exist", missing, "adaptive-pg-mcp cannot read the catalog folder " + missing + ": " + statErr.Error() + ". Create it, correct catalog in server.yaml, or set catalog: none."},
+		{"a file instead of a folder", file, "the catalog path " + file + " is a file, not a folder. Point catalog at the folder that holds the .sql files, or set catalog: none."},
 	}
-	// readErr is the error of reading rel in the folder root, as the loader reads it.
+	// readErr is the error of reading rel in the folder root, as the loader
+	// reads it.
 	readErr := func(root, rel string) string {
 		r, err := os.OpenRoot(root)
 		if err != nil {
@@ -285,13 +290,13 @@ func TestLoadRefusesAFolderItCannotRead(t *testing.T) {
 		t.Fatal(err)
 	}
 	absolute := func(rel, dir string) string {
-		return rel + " is a link to an absolute path, and adaptive-pg-mcp follows only relative links that stay inside the catalog folder " + dir + ". Make it a relative link to a path inside the folder, or remove it."
+		return rel + " is a link to an absolute path. Make it a relative link inside the catalog folder " + dir + ", or remove it."
 	}
 	climbs := func(rel, dir string) string {
-		return rel + " is a link whose path climbs above the catalog folder " + dir + ", and adaptive-pg-mcp follows only relative links that stay inside it. Make it a relative link to a path inside the folder, or remove it."
+		return rel + " is a link that climbs above the catalog folder " + dir + ". Make it a relative link inside the folder, or remove it."
 	}
 	through := func(rel, dir string) string {
-		return rel + " is a link that leads through another link to an absolute path or above the catalog folder " + dir + ", and adaptive-pg-mcp follows only relative links that stay inside it. Make each link on the way relative and inside the folder, or remove it."
+		return rel + " is a link through another link that is absolute or leaves the catalog folder " + dir + ". Make each link on the way relative and inside the folder, or remove it."
 	}
 	cases = append(cases, struct{ name, dir, want string }{"an absolute link to a file outside the folder", linked, absolute("finance/revenue.sql", linked)})
 	inner := writeTree(t, filepath.Join(dir, "inner"), map[string]string{"finance/tools.yaml": okIndex, "shared/revenue.sql": okSQL})
@@ -318,14 +323,14 @@ func TestLoadRefusesAFolderItCannotRead(t *testing.T) {
 	}
 	_, brokenErr := filepath.EvalSymlinks(brokenLink)
 	cases = append(cases, struct{ name, dir, want string }{"a link to nothing", broken,
-		"adaptive-pg-mcp cannot read finance/revenue.sql in the catalog folder " + broken + ": " + brokenErr.Error() + ". Make it a file inside the catalog folder that the user who runs adaptive-pg-mcp can read, or remove it."})
+		"adaptive-pg-mcp cannot read finance/revenue.sql in the catalog folder " + broken + ": " + brokenErr.Error() + ". Make it a file that adaptive-pg-mcp can read, or remove it."})
 	if os.Getuid() != 0 {
 		locked := writeTree(t, filepath.Join(dir, "locked"), map[string]string{"finance/revenue.sql": okSQL, "finance/tools.yaml": okIndex})
 		if err := os.Chmod(filepath.Join(locked, "finance", "revenue.sql"), 0); err != nil {
 			t.Fatal(err)
 		}
 		cases = append(cases, struct{ name, dir, want string }{"a file that cannot be read", locked,
-			"adaptive-pg-mcp cannot read finance/revenue.sql in the catalog folder " + locked + ": " + readErr(locked, "finance/revenue.sql") + ". Make it a file inside the catalog folder that the user who runs adaptive-pg-mcp can read, or remove it."})
+			"adaptive-pg-mcp cannot read finance/revenue.sql in the catalog folder " + locked + ": " + readErr(locked, "finance/revenue.sql") + ". Make it a file that adaptive-pg-mcp can read, or remove it."})
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -344,7 +349,8 @@ func TestLoadRefusesAFolderItCannotRead(t *testing.T) {
 	})
 }
 
-// links makes each link of links, by its path relative to dir, point at its target, which is relative to the link's own folder.
+// links makes each link of links, by its path relative to dir, point at its
+// target, which is relative to the link's own folder.
 func links(t *testing.T, dir string, links map[string]string) {
 	t.Helper()
 	for link, target := range links {
@@ -366,7 +372,7 @@ func TestLoadSkipsHiddenNamesAndFollowsLinksInside(t *testing.T) {
 		name  string
 		files map[string]string
 		links map[string]string
-		// sources are the Source of each entry Load answers, in order.
+		// sources are the Source of each entry Load returns, in order.
 		sources []string
 	}{
 		{"the layout of a Kubernetes ConfigMap mount",

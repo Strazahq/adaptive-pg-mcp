@@ -12,7 +12,7 @@ import (
 func TestRaisedLimitsAreReported(t *testing.T) {
 	server := config.Limits{Rows: 1000, Bytes: 1048576, Timeout: 30 * time.Second, WriteRows: 100}
 	raises := func(field, to, from string) Finding {
-		return Finding{Text: "finance/tools.yaml entry revenue_by_region raises limits." + field + " to " + to + ", above the " + from + " that server.yaml sets, so its calls may go past the cap of the built-in tools. Lower it in the entry if that is not intended."}
+		return Finding{Text: "finance/tools.yaml: the catalog tool revenue_by_region raises limits." + field + " to " + to + ", above the " + from + " in server.yaml. Lower it if that is not intended."}
 	}
 	cases := []struct {
 		name   string

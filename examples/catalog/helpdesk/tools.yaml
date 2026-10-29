@@ -5,7 +5,7 @@
 version: 1
 tools:
   tickets_by_status:
-    description: Counts the tickets opened on or after a day, per status. Answers one row per status with its count.
+    description: Counts the tickets opened on or after a day, per status. Returns one row per status with its count.
     mode: read
     databases: [helpdesk]
     login: read
@@ -14,7 +14,7 @@ tools:
         description: The first day to count, such as 2026-10-01.
         required: true
   close_stale_tickets:
-    description: Closes the tickets that have waited in pending for more than a number of days. Answers the id of each ticket it closed, and refuses a call that would close more than 50.
+    description: Closes the tickets that have waited in pending for more than a number of days. Returns the id of each ticket it closed, and refuses a call that would close more than 50.
     mode: write
     databases: [helpdesk]
     login: write

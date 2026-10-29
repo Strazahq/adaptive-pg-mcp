@@ -142,7 +142,7 @@ func TestServeStdioRefusesAMissingOrWrongToken(t *testing.T) {
 		strazaHint     = "a token whose SHA-256 is in gateway_tokens_sha256"
 	)
 	missing := func(hint string) string {
-		return "ADAPTIVE_PG_MCP_TOKEN is not set, and on stdio adaptive-pg-mcp needs it to know who calls, so it will not start. Set ADAPTIVE_PG_MCP_TOKEN to " + hint + " in the environment the client starts the server with."
+		return "ADAPTIVE_PG_MCP_TOKEN is not set, so adaptive-pg-mcp cannot tell who calls on stdio and will not start. Set ADAPTIVE_PG_MCP_TOKEN to " + hint + ",, in the env of the client's MCP server entry."
 	}
 	wrong := func(hint string) string {
 		return "the token in ADAPTIVE_PG_MCP_TOKEN matches no configured hash, so adaptive-pg-mcp will not start. Set ADAPTIVE_PG_MCP_TOKEN to " + hint + "."
@@ -189,7 +189,7 @@ func TestARequestWithoutACallerIsRefused(t *testing.T) {
 	}
 	defer ss.Close()
 	_, err = mcp.NewClient(&mcp.Implementation{Name: "test", Version: "1"}, nil).Connect(ctx, ct, nil)
-	if err == nil || !strings.Contains(err.Error(), "the request has no checked caller, so adaptive-pg-mcp refused it.") {
+	if err == nil || !strings.Contains(err.Error(), "the request has no checked caller.") {
 		t.Errorf("a session without a checked caller connected, or failed otherwise: %v", err)
 	}
 }

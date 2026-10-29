@@ -10,16 +10,16 @@ import (
 
 func TestExecuteDDL(t *testing.T) {
 	notCounted := func(tag string) string {
-		return "execute_sql on helpdesk ran a statement whose command tag is " + tag + ", which the write cap cannot count, so it was rolled back and nothing was changed. Use execute_ddl for TRUNCATE and for statements that change structure."
+		return "execute_sql on helpdesk rolled back the statement with command tag " + tag + ", which the write cap cannot count. Use execute_ddl for TRUNCATE and changes of structure."
 	}
 	onRows := func(tag string) string {
-		return "execute_ddl on helpdesk ran a statement whose command tag is " + tag + ", which works on rows and changed no structure, so it was rolled back and nothing was changed. Use execute_sql to change rows under the write cap, or query_sql to read them."
+		return "execute_ddl on helpdesk rolled back the statement with command tag " + tag + ", because it changed no structure. Use execute_sql to change rows, or query_sql to read them."
 	}
 	// Each step runs in order on a table that the login owns, and answers rowsAffected and text, or the refusal.
 	steps := []struct {
 		name, tool, sql, want string
 	}{
-		{"execute_ddl creates a table", "execute_ddl", "CREATE TABLE owned (a int)", "execute_ddl ran CREATE TABLE on helpdesk and answered 0 rows."},
+		{"execute_ddl creates a table", "execute_ddl", "CREATE TABLE owned (a int)", "execute_ddl ran CREATE TABLE on helpdesk and returned 0 rows."},
 		{"execute_sql fills it", "execute_sql", "INSERT INTO owned SELECT generate_series(1, 3)", ""},
 		{"execute_ddl creates a function that writes", "execute_ddl", "CREATE FUNCTION purge_owned() RETURNS void LANGUAGE sql AS 'DELETE FROM owned'", ""},
 		{"execute_sql refuses TRUNCATE", "execute_sql", "TRUNCATE owned", notCounted("TRUNCATE TABLE")},
@@ -30,7 +30,7 @@ func TestExecuteDDL(t *testing.T) {
 		{"execute_ddl refuses UPDATE", "execute_ddl", "UPDATE owned SET a = 0", onRows("UPDATE 3")},
 		{"execute_ddl refuses DELETE", "execute_ddl", "DELETE FROM owned", onRows("DELETE 3")},
 		{"execute_ddl refuses a SELECT that calls a function which writes", "execute_ddl", "SELECT purge_owned()", onRows("SELECT 1")},
-		{"execute_ddl refuses two statements", "execute_ddl", "ALTER TABLE owned ADD COLUMN b int; DROP TABLE owned", "execute_ddl on helpdesk failed, because the server answered: cannot insert multiple commands into a prepared statement (SQLSTATE 42601), so nothing was changed. Correct the call as the reason says, and call it again."},
+		{"execute_ddl refuses two statements", "execute_ddl", "ALTER TABLE owned ADD COLUMN b int; DROP TABLE owned", "execute_ddl on helpdesk changed nothing, because Postgres said: cannot insert multiple commands into a prepared statement (SQLSTATE 42601). Correct the call and try again."},
 	}
 	for _, s := range pgtest.Servers(t) {
 		t.Run(s.String(), func(t *testing.T) {
@@ -71,7 +71,7 @@ func TestExecuteDDL(t *testing.T) {
 			} {
 				res := callTool(t, cs, "execute_ddl", helpdesk(map[string]any{"sql": c.sql}), nil)
 				m := out.check(t, "execute_ddl", res)
-				if got, want := textOf(t, res), "execute_ddl ran "+c.tag+" on helpdesk and answered 0 rows."; got != want || m["rowsAffected"] != float64(0) {
+				if got, want := textOf(t, res), "execute_ddl ran "+c.tag+" on helpdesk and returned 0 rows."; got != want || m["rowsAffected"] != float64(0) {
 					t.Errorf("execute_ddl %s answered %s and %v rows changed, want %s and 0", c.sql, got, m["rowsAffected"], want)
 				}
 				if got := state(); got != c.state {
@@ -89,9 +89,9 @@ func TestExecuteDDL(t *testing.T) {
 }
 
 func TestRowWorkGoesThroughExecuteSQL(t *testing.T) {
-	const capped = "execute_sql on helpdesk would change 150 rows and the cap is 100, so nothing was changed. Narrow the statement, or ask an administrator to raise write_rows."
+	const capped = "execute_sql on helpdesk would change 150 rows, over the cap of 100, and changed nothing. Narrow the statement, or ask an administrator to raise limits.write_rows in server.yaml."
 	onRows := func(tag string) string {
-		return "execute_ddl on helpdesk ran a statement whose command tag is " + tag + ", which works on rows and changed no structure, so it was rolled back and nothing was changed. Use execute_sql to change rows under the write cap, or query_sql to read them."
+		return "execute_ddl on helpdesk rolled back the statement with command tag " + tag + ", because it changed no structure. Use execute_sql to change rows, or query_sql to read them."
 	}
 	cases := []struct {
 		name, tool, sql string
@@ -145,7 +145,7 @@ func TestRowWorkGoesThroughExecuteSQL(t *testing.T) {
 
 func TestStructureChangesStayOutOfExecuteSQL(t *testing.T) {
 	structure := func(tag string) string {
-		return "execute_sql on helpdesk ran a statement whose command tag is " + tag + " and that changed structure, as the system catalogs show, so it was rolled back and nothing was changed. Use execute_ddl for TRUNCATE and for statements that change structure."
+		return "execute_sql on helpdesk rolled back the statement with command tag " + tag + ", because it changed the system catalogs. Use execute_ddl for TRUNCATE and changes of structure."
 	}
 	cases := []struct {
 		name, tool, sql string
@@ -162,7 +162,7 @@ func TestStructureChangesStayOutOfExecuteSQL(t *testing.T) {
 		{"a DELETE of a toasted value", "execute_sql", "DELETE FROM toasted WHERE id = 2", ""},
 		{"nextval", "execute_sql", "SELECT nextval('seq')", ""},
 		{"execute_ddl refreshes a materialized view larger than the cap", "execute_ddl", "REFRESH MATERIALIZED VIEW copied", ""},
-		{"execute_ddl caps the rows a refresh writes through a function", "execute_ddl", "REFRESH MATERIALIZED VIEW writes", "execute_ddl on helpdesk would change 150 rows and the cap is 100, so nothing was changed. Run row changes through execute_sql, or ask an administrator to raise write_rows."},
+		{"execute_ddl caps the rows a refresh writes through a function", "execute_ddl", "REFRESH MATERIALIZED VIEW writes", "execute_ddl on helpdesk would change 150 rows, over the cap of 100, and changed nothing. Run row changes through execute_sql, or ask an administrator to raise limits.write_rows in server.yaml."},
 	}
 	for _, s := range pgtest.Servers(t) {
 		t.Run(s.String(), func(t *testing.T) {
@@ -202,7 +202,7 @@ func TestStructureChangesStayOutOfExecuteSQL(t *testing.T) {
 
 func TestExecuteDDLRunsStructureThatAnswersRows(t *testing.T) {
 	structure := func(tag string) string {
-		return "execute_sql on helpdesk ran a statement whose command tag is " + tag + " and that changed structure, as the system catalogs show, so it was rolled back and nothing was changed. Use execute_ddl for TRUNCATE and for statements that change structure."
+		return "execute_sql on helpdesk rolled back the statement with command tag " + tag + ", because it changed the system catalogs. Use execute_ddl for TRUNCATE and changes of structure."
 	}
 	const mixed = "DO $$BEGIN CREATE TABLE made (a int); DELETE FROM public.plain WHERE id <= 150; END$$"
 	cases := []struct {
@@ -214,8 +214,8 @@ func TestExecuteDDLRunsStructureThatAnswersRows(t *testing.T) {
 		{"execute_sql refuses SELECT INTO", "execute_sql", "SELECT * INTO copy2 FROM plain", structure("SELECT 500"), ""},
 		{"execute_sql refuses CREATE MATERIALIZED VIEW AS", "execute_sql", "CREATE MATERIALIZED VIEW mv2 AS SELECT * FROM plain", structure("SELECT 500"), ""},
 		{"execute_sql refuses a DO block that creates and deletes", "execute_sql", mixed, structure("DO"), ""},
-		{"execute_ddl refuses a DO block that creates a table and deletes past the cap", "execute_ddl", mixed, "execute_ddl on helpdesk would change 150 rows and the cap is 100, so nothing was changed. Run row changes through execute_sql, or ask an administrator to raise write_rows.", ""},
-		{"execute_ddl refuses pure row work", "execute_ddl", "DELETE FROM plain WHERE id = 1", "execute_ddl on helpdesk ran a statement whose command tag is DELETE 1, which works on rows and changed no structure, so it was rolled back and nothing was changed. Use execute_sql to change rows under the write cap, or query_sql to read them.", ""},
+		{"execute_ddl refuses a DO block that creates a table and deletes past the cap", "execute_ddl", mixed, "execute_ddl on helpdesk would change 150 rows, over the cap of 100, and changed nothing. Run row changes through execute_sql, or ask an administrator to raise limits.write_rows in server.yaml.", ""},
+		{"execute_ddl refuses pure row work", "execute_ddl", "DELETE FROM plain WHERE id = 1", "execute_ddl on helpdesk rolled back the statement with command tag DELETE 1, because it changed no structure. Use execute_sql to change rows, or query_sql to read them.", ""},
 		{"execute_ddl runs CREATE TABLE AS of 500 rows past the cap", "execute_ddl", "CREATE TABLE copy AS SELECT * FROM plain", "", "copy"},
 		{"execute_ddl runs SELECT INTO past the cap", "execute_ddl", "SELECT * INTO copy2 FROM plain", "", "copy2"},
 		{"execute_ddl runs CREATE MATERIALIZED VIEW AS past the cap", "execute_ddl", "CREATE MATERIALIZED VIEW mv2 AS SELECT * FROM plain", "", "mv2"},
@@ -256,7 +256,7 @@ func TestExecuteDDLRunsStructureThatAnswersRows(t *testing.T) {
 
 func TestWriteToolsRefuseATriggerThatChangesStructure(t *testing.T) {
 	refused := func(tool, tag string) string {
-		return tool + " on helpdesk ran a statement whose command tag is " + tag + " and that changed structure, as the system catalogs show, so it was rolled back and nothing was changed. A trigger on the table changes structure, so ask an administrator to change it, or use execute_ddl."
+		return tool + " on helpdesk rolled back the statement with command tag " + tag + ", because it changed the system catalogs. A trigger on the table changes structure. Ask an administrator to change the trigger, or use execute_ddl."
 	}
 	one := []any{map[string]any{"column": "id", "op": "=", "value": 1}}
 	cases := []struct {

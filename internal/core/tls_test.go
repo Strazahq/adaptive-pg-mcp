@@ -115,8 +115,8 @@ func TestCheckTLS(t *testing.T) {
 	badKey := filepath.Join(dir, "bad.key")
 	writeFile(t, badKey, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: []byte("not DER")}))
 	missing := filepath.Join(dir, "missing.crt")
-	const stop = ", so adaptive-pg-mcp will not start. "
-	readable := "Check that the file exists and that the user adaptive-pg-mcp runs as may read it."
+	const stop = ". "
+	readable := "Check that it exists and that the user the server runs as can read it."
 	cases := []struct {
 		name  string
 		files config.TLS
@@ -124,23 +124,23 @@ func TestCheckTLS(t *testing.T) {
 	}{
 		{"a valid pair", good, ""},
 		{"an expired certificate", expired, "the certificate in " + expired.CertFile + " expired at " + old.NotAfter.UTC().Format(time.RFC3339) + stop +
-			"Renew it, and put the new certificate and its private key in " + expired.CertFile + " and " + expired.KeyFile + "."},
+			"Renew it, and put the new certificate and key in " + expired.CertFile + " and " + expired.KeyFile + "."},
 		{"the key of another certificate", config.TLS{CertFile: good.CertFile, KeyFile: other.KeyFile},
-			"the private key in " + other.KeyFile + " does not belong to the certificate in " + good.CertFile + stop + "Put a certificate and its own private key in the two files."},
+			"the private key in " + other.KeyFile + " does not match the certificate in " + good.CertFile + stop + "Put a certificate and its own private key in the two files."},
 		{"a certificate file without PEM", config.TLS{CertFile: notPEM, KeyFile: good.KeyFile},
-			"the certificate file " + notPEM + " holds no certificate in PEM form" + stop + "Put the server's certificate in it in PEM form, followed by any intermediate certificates."},
+			"the certificate file " + notPEM + " holds no PEM certificate" + stop + "Put the server certificate in it as PEM, followed by any intermediate certificates."},
 		{"the two files switched", config.TLS{CertFile: good.KeyFile, KeyFile: good.CertFile},
-			"the certificate file " + good.KeyFile + " holds no certificate in PEM form" + stop + "Put the server's certificate in it in PEM form, followed by any intermediate certificates."},
+			"the certificate file " + good.KeyFile + " holds no PEM certificate" + stop + "Put the server certificate in it as PEM, followed by any intermediate certificates."},
 		{"a key file without PEM", config.TLS{CertFile: good.CertFile, KeyFile: notPEM},
-			"the key file " + notPEM + " holds no private key in PEM form" + stop + "Put the private key of the certificate in it, in PEM form."},
+			"the key file " + notPEM + " holds no PEM private key" + stop + "Put the certificate's private key in it as PEM."},
 		{"a certificate that does not parse", config.TLS{CertFile: badCert, KeyFile: good.KeyFile},
-			"the first certificate in " + badCert + " does not parse as an X.509 certificate" + stop + "Replace it with the server's certificate as its issuer gave it."},
+			"the first certificate in " + badCert + " does not parse as an X.509 certificate" + stop + "Replace it with the server certificate as issued."},
 		{"a key that does not parse", config.TLS{CertFile: good.CertFile, KeyFile: badKey},
-			"the private key in " + badKey + " does not parse as an RSA, ECDSA or Ed25519 key" + stop + "Replace it with the private key of the certificate in " + good.CertFile + ", in PEM form."},
+			"the private key in " + badKey + " does not parse as an RSA, ECDSA or Ed25519 key" + stop + "Replace it with the PEM private key of the certificate in " + good.CertFile + "."},
 		{"a missing certificate file", config.TLS{CertFile: missing, KeyFile: good.KeyFile},
-			"the certificate file " + missing + ", which tls.cert_file names, cannot be read: no such file or directory" + stop + readable},
+			"the certificate file " + missing + " (tls.cert_file) cannot be read: no such file or directory" + stop + readable},
 		{"a key file that is a folder", config.TLS{CertFile: good.CertFile, KeyFile: dir},
-			"the key file " + dir + ", which tls.key_file names, cannot be read: is a directory" + stop + readable},
+			"the key file " + dir + " (tls.key_file) cannot be read: is a directory" + stop + readable},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -161,7 +161,7 @@ func TestCheckReportsPlainHTTPBeyondThisMachine(t *testing.T) {
 	cases := []struct {
 		name, listen, want string
 	}{
-		{"every interface", "0.0.0.0:8080", "listen 0.0.0.0:8080 serves plain HTTP beyond this machine, which allow_plain_http: true accepts. The bearer tokens of the callers cross the network in cleartext unless something in front of the server encrypts the traffic, such as a service mesh. Set tls with cert_file and key_file to serve HTTPS instead."},
+		{"every interface", "0.0.0.0:8080", "listen 0.0.0.0:8080 serves plain HTTP beyond this machine, which allow_plain_http: true accepts. Bearer tokens cross the network in cleartext unless a proxy or service mesh encrypts the traffic. Set tls.cert_file and tls.key_file to serve HTTPS."},
 		{"loopback", "127.0.0.1:8080", ""},
 	}
 	for _, c := range cases {
@@ -225,7 +225,7 @@ func TestServeWarnsOfPlainHTTPBeyondThisMachine(t *testing.T) {
 	if !strings.HasPrefix(url, "http://127.0.0.1:") {
 		t.Errorf("Serve logged the address %s, want http://127.0.0.1 and a port", url)
 	}
-	const warn = `level=WARN msg="listen 0.0.0.0:8080 serves plain HTTP beyond this machine, which allow_plain_http: true accepts. The bearer tokens of the callers cross the network in cleartext unless something in front of the server encrypts the traffic, such as a service mesh. Set tls with cert_file and key_file to serve HTTPS instead."`
+	const warn = `level=WARN msg="listen 0.0.0.0:8080 serves plain HTTP beyond this machine, which allow_plain_http: true accepts. Bearer tokens cross the network in cleartext unless a proxy or service mesh encrypts the traffic. Set tls.cert_file and tls.key_file to serve HTTPS."`
 	if !strings.Contains(logs.String(), warn) {
 		t.Errorf("the start log does not warn of plain HTTP:\n%s", logs.String())
 	}
@@ -377,8 +377,8 @@ func TestServeRenewsThePair(t *testing.T) {
 	url, logs := serveTLS(t, files)
 	addr := strings.TrimSuffix(strings.TrimPrefix(url, "https://"), endpointPath)
 	roots := trusting(first, secondLeaf, fourthLeaf)
-	mismatch := "the private key in " + files.KeyFile + " does not belong to the certificate in " + files.CertFile + ", so adaptive-pg-mcp keeps serving the certificate it loaded before. Put a certificate and its own private key in the two files."
-	notPEM := "the certificate file " + files.CertFile + " holds no certificate in PEM form, so adaptive-pg-mcp keeps serving the certificate it loaded before. Put the server's certificate in it in PEM form, followed by any intermediate certificates."
+	mismatch := "the private key in " + files.KeyFile + " does not match the certificate in " + files.CertFile + ", so the server keeps serving the previous certificate. Put a certificate and its own private key in the two files."
+	notPEM := "the certificate file " + files.CertFile + " holds no PEM certificate, so the server keeps serving the previous certificate. Put the server certificate in it as PEM, followed by any intermediate certificates."
 	steps := []struct {
 		name   string
 		change func()
@@ -446,9 +446,9 @@ func TestServeRefusesAPairThatDoesNotLoad(t *testing.T) {
 		want  string
 	}{
 		{"an expired certificate", expired, "the certificate in " + expired.CertFile + " expired at " + old.NotAfter.UTC().Format(time.RFC3339) +
-			", so adaptive-pg-mcp will not start. Renew it, and put the new certificate and its private key in " + expired.CertFile + " and " + expired.KeyFile + "."},
+			". Renew it, and put the new certificate and key in " + expired.CertFile + " and " + expired.KeyFile + "."},
 		{"the key of another certificate", config.TLS{CertFile: good.CertFile, KeyFile: other.KeyFile},
-			"the private key in " + other.KeyFile + " does not belong to the certificate in " + good.CertFile + ", so adaptive-pg-mcp will not start. Put a certificate and its own private key in the two files."},
+			"the private key in " + other.KeyFile + " does not match the certificate in " + good.CertFile + ". Put a certificate and its own private key in the two files."},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -460,7 +460,7 @@ func TestServeRefusesAPairThatDoesNotLoad(t *testing.T) {
 				t.Fatal(err)
 			}
 			err = New(cfg, slog.New(slog.NewTextHandler(logs, nil))).Serve(context.Background(), ln)
-			const refused = "adaptive-pg-mcp will not start, because 1 start check refused it, as the log lines above say. Fix what each one says, and run adaptive-pg-mcp check to check again without serving."
+			const refused = "adaptive-pg-mcp will not start, because 1 start check refused it. Fix what the log lines above say, and run adaptive-pg-mcp check to test the fix without serving."
 			if err == nil || err.Error() != refused {
 				t.Errorf("Serve answered %v, want: %s", err, refused)
 			}
@@ -497,9 +497,9 @@ func TestServeRefusesPlainHTTPOffLoopback(t *testing.T) {
 		want  string
 	}{
 		{"plain HTTP on an address of another network", elsewhere, false, false,
-			"listen localhost:8080 resolved to 192.0.2.10:8080, which is not a loopback address, so without tls the bearer tokens of its callers could cross the network in cleartext, and adaptive-pg-mcp will not start. Make localhost resolve to 127.0.0.1, set listen to a loopback address such as 127.0.0.1:8080, or add tls with cert_file and key_file."},
+			"adaptive-pg-mcp will not start, because listen localhost:8080 resolved to 192.0.2.10:8080, not a loopback address, and without tls the tokens would cross the network in cleartext. Make localhost resolve to 127.0.0.1, set listen to 127.0.0.1:8080, or set tls.cert_file and tls.key_file."},
 		{"plain HTTP on an IPv6 link-local address", &net.TCPAddr{IP: net.ParseIP("fe80::1"), Port: 8080, Zone: "eth0"}, false, false,
-			"listen localhost:8080 resolved to [fe80::1%eth0]:8080, which is not a loopback address, so without tls the bearer tokens of its callers could cross the network in cleartext, and adaptive-pg-mcp will not start. Make localhost resolve to 127.0.0.1, set listen to a loopback address such as 127.0.0.1:8080, or add tls with cert_file and key_file."},
+			"adaptive-pg-mcp will not start, because listen localhost:8080 resolved to [fe80::1%eth0]:8080, not a loopback address, and without tls the tokens would cross the network in cleartext. Make localhost resolve to 127.0.0.1, set listen to 127.0.0.1:8080, or set tls.cert_file and tls.key_file."},
 		{"plain HTTP on ::1", &net.TCPAddr{IP: net.IPv6loopback, Port: 8080}, false, false, ""},
 		{"plain HTTP that allow_plain_http accepts", elsewhere, false, true, ""},
 		{"HTTPS", elsewhere, true, false, ""},

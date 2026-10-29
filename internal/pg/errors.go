@@ -18,7 +18,8 @@ type Error struct {
 	Connect bool
 	// Reason says why, in words that are safe to log.
 	Reason string
-	// err is the driver's error, kept for errors.Is and errors.As and never printed.
+	// err is the driver's error, kept for errors.Is and errors.As and never
+	// printed.
 	err error
 }
 
@@ -33,11 +34,11 @@ func (p *Pools) wrap(err error, connect bool) error {
 	return &Error{Connect: connect, Reason: p.Reason(err), err: err}
 }
 
-// Reason says why err happened in words that are safe to log, and never
-// repeats a connection string or a password of the pools. For an error that
-// Postgres reported it is the server's own message and SQLSTATE. For a
-// failure to connect it is a plain cause, such as a host name that does not
-// resolve, and otherwise the innermost message of the driver.
+// Reason says why err happened in words that are safe to log, with every
+// connection string and password of the pools hidden. A Postgres error
+// becomes its message and SQLSTATE, a failure to connect a plain cause such
+// as a host name that does not resolve, and anything else the driver's
+// innermost message.
 func (p *Pools) Reason(err error) string {
 	var e *Error
 	if errors.As(err, &e) {
@@ -45,14 +46,14 @@ func (p *Pools) Reason(err error) string {
 	}
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) {
-		return p.scrub("the server answered: " + pgErr.Message + " (SQLSTATE " + pgErr.Code + ")")
+		return p.scrub("Postgres said: " + pgErr.Message + " (SQLSTATE " + pgErr.Code + ")")
 	}
 	var dns *net.DNSError
 	switch {
 	case errors.Is(err, context.Canceled):
-		return "the call was cancelled before the server answered"
+		return "the call was cancelled before Postgres replied"
 	case errors.Is(err, context.DeadlineExceeded) || pgconn.Timeout(err):
-		return "the server did not answer in time"
+		return "Postgres did not reply in time"
 	case errors.As(err, &dns):
 		return "the host name of the connection string does not resolve"
 	case errors.Is(err, syscall.ECONNREFUSED):
@@ -61,7 +62,8 @@ func (p *Pools) Reason(err error) string {
 	return p.scrub("the connection reported: " + innermost(err).Error())
 }
 
-// scrub replaces every connection string and password of the pools in s, also in their URL-escaped forms.
+// scrub replaces every connection string and password of the pools in s,
+// also in their URL-escaped forms.
 func (p *Pools) scrub(s string) string {
 	for _, secret := range p.secrets {
 		for _, form := range []string{secret, url.QueryEscape(secret), url.PathEscape(secret)} {

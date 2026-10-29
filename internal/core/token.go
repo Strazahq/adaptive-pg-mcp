@@ -16,10 +16,12 @@ import (
 	"github.com/strazahq/adaptive-pg-mcp/internal/config"
 )
 
-// gatewayCaller is the caller of every request in mode straza, where Straza decides per agent.
+// gatewayCaller is the caller of every request in straza mode, where Straza
+// decides per agent.
 const gatewayCaller = "straza"
 
-// tokenPrefix starts every token that adaptive-pg-mcp token makes. The check does not require it.
+// tokenPrefix starts every token that adaptive-pg-mcp token makes. The token
+// check does not require it.
 const tokenPrefix = "apm_"
 
 // credential is one configured token hash and the caller it names.
@@ -28,8 +30,9 @@ type credential struct {
 	caller string
 }
 
-// credentials returns the hashes the token check accepts: the gateway's in
-// mode straza, and the callers' of access.yaml in mode standalone.
+// credentials returns the hashes the token check accepts: those of
+// gateway_tokens_sha256 in straza mode, and those of the callers in
+// access.yaml in standalone mode.
 func credentials(cfg *config.Config) []credential {
 	var creds []credential
 	if cfg.Mode == config.Straza {
@@ -63,15 +66,18 @@ func match(creds []credential, token string) (string, bool) {
 	return creds[found].caller, true
 }
 
-// refusal says why the token check turned a request away. The zero refusal admits it.
+// refusal says why the token check turned a request away. The zero refusal
+// admits it.
 type refusal int
 
 const (
 	// admitted lets the request through.
 	admitted refusal = iota
-	// noBearer is a request without Bearer credentials: no Authorization header, or one of another scheme.
+	// noBearer is a request without Bearer credentials: no Authorization
+	// header, or one of another scheme.
 	noBearer
-	// badBearer is a request whose Bearer credentials are malformed or match no configured hash.
+	// badBearer is a request whose Bearer credentials are malformed or match
+	// no configured hash.
 	badBearer
 )
 
@@ -101,20 +107,23 @@ func checkBearer(creds []credential, values []string) (string, refusal) {
 const (
 	// realm names the protection space in every challenge.
 	realm = `Bearer realm="adaptive-pg-mcp"`
-	// missingBearer answers a request that carries no bearer token.
-	missingBearer = "the request carries no bearer token, so adaptive-pg-mcp refused it. Send the header Authorization: Bearer followed by the token issued for this server."
-	// invalidBearer answers a request whose bearer token is malformed or unknown.
-	invalidBearer = "the bearer token of the request is malformed or not one this server knows, so adaptive-pg-mcp refused it. Send the token issued for this server, once, after Bearer."
+	// missingBearer is the response body for a request without a bearer token.
+	missingBearer = "the request has no bearer token. Send the header Authorization: Bearer followed by the token issued for this server."
+	// invalidBearer is the response body for a malformed or unknown bearer
+	// token.
+	invalidBearer = "the bearer token is malformed or unknown to this server. Send the token issued for this server, once, after Bearer."
 )
 
-// checkedCallerKey carries the caller the token check found to the SDK's token verifier.
+// checkedCallerKey carries the caller the token check found to the SDK's
+// token verifier.
 type checkedCallerKey struct{}
 
-// authenticate runs the token check on every HTTP request. It answers 401
-// with a challenge and a sentence, and never logs or repeats the token. On a
-// match it hands the caller to the SDK's bearer middleware, which puts it in
-// TokenInfo.UserID for session binding and for the request's handlers, and
-// it removes the Authorization header so that nothing past the check sees it.
+// authenticate runs the token check on every HTTP request. A refusal gets
+// 401 with a challenge and a message, and the token is never logged or
+// repeated. On a match it hands the caller to the SDK's bearer middleware,
+// which puts it in TokenInfo.UserID for session binding and the request's
+// handlers, and it removes the Authorization header so that nothing past the
+// check sees it.
 func (s *Server) authenticate(next http.Handler) http.Handler {
 	verify := func(ctx context.Context, _ string, _ *http.Request) (*auth.TokenInfo, error) {
 		caller, ok := ctx.Value(checkedCallerKey{}).(string)

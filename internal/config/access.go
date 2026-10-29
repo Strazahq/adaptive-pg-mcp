@@ -5,13 +5,13 @@ import (
 	"os"
 )
 
-// rawAccess is access.yaml as written. A nil field is a key the file does not set.
+// rawAccess is access.yaml as written. A nil field is a key the file does
+// not set.
 type rawAccess struct {
 	Version *int         `yaml:"version"`
 	Callers []*rawCaller `yaml:"callers"`
 }
 
-// rawCaller is one caller as written.
 type rawCaller struct {
 	Name        *string   `yaml:"name"`
 	TokenSHA256 *string   `yaml:"token_sha256"`
@@ -20,43 +20,44 @@ type rawCaller struct {
 	Tables      []string  `yaml:"tables"`
 }
 
-// callerKeys is the reason every missing caller key gives.
-const callerKeys = "and every caller needs name, token_sha256, tools and databases"
+// callerKeys follows the key in every missing caller key refusal.
+const callerKeys = "a required key"
 
-// loadAccess reads access.yaml at path and checks every caller against the databases of server.yaml.
+// loadAccess reads access.yaml at path and checks every caller against the
+// databases of server.yaml.
 func loadAccess(path string, databases map[string]Database) ([]Caller, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("adaptive-pg-mcp cannot read access.yaml at %s, which server.yaml names in access: %v. Create the file, or correct the path in access.", path, err)
+		return nil, fmt.Errorf("adaptive-pg-mcp cannot read access.yaml at %s: %v. Create the file, or correct access in server.yaml.", path, err)
 	}
 	var raw rawAccess
 	if err := decode(path, data, &raw); err != nil {
 		return nil, err
 	}
 	if len(raw.Callers) == 0 {
-		return nil, fmt.Errorf("%s does not set callers, so no request could pass the token check. Add callers with at least one caller.", path)
+		return nil, fmt.Errorf("%s does not set callers. Add at least one caller.", path)
 	}
 	names := map[string]bool{}
 	owners := map[Hash]string{}
 	callers := make([]Caller, 0, len(raw.Callers))
 	for i, rc := range raw.Callers {
 		if rc == nil || unset(rc.Name) {
-			return nil, fmt.Errorf("%s caller %d does not set name, %s. Add name: a name of its own for the caller.", path, i+1, callerKeys)
+			return nil, fmt.Errorf("%s caller %d does not set name, %s. Add name: a unique name for the caller.", path, i+1, callerKeys)
 		}
 		name := *rc.Name
 		if names[name] {
-			return nil, fmt.Errorf("%s lists the caller %s twice. Give each caller its own name.", path, name)
+			return nil, fmt.Errorf("%s lists the caller %s twice. Give each caller a unique name.", path, name)
 		}
 		names[name] = true
 		if unset(rc.TokenSHA256) {
-			return nil, fmt.Errorf("%s caller %s does not set token_sha256, %s. Add the hash that adaptive-pg-mcp token prints.", path, name, callerKeys)
+			return nil, fmt.Errorf("%s caller %s does not set token_sha256, %s. Add the token_sha256 that adaptive-pg-mcp token prints.", path, name, callerKeys)
 		}
 		hash, ok := parseHash(*rc.TokenSHA256)
 		if !ok {
-			return nil, fmt.Errorf("%s caller %s has a token_sha256 that is not 64 lowercase hexadecimal characters. Write the hash as adaptive-pg-mcp token prints it.", path, name)
+			return nil, fmt.Errorf("%s caller %s has a token_sha256 that is not 64 lowercase hex characters. Copy it as adaptive-pg-mcp token prints it.", path, name)
 		}
 		if other, dup := owners[hash]; dup {
-			return nil, fmt.Errorf("%s gives the callers %s and %s the same token_sha256, so the token check could not tell them apart. Give each caller its own token.", path, other, name)
+			return nil, fmt.Errorf("%s gives the callers %s and %s the same token_sha256. Give each caller its own token.", path, other, name)
 		}
 		owners[hash] = name
 		if rc.Tools == nil {

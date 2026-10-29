@@ -44,21 +44,20 @@ func (s *Server) readRowsTool() *dataTool {
 	in := s.input(map[string]*jsonschema.Schema{
 		"schema":  schemaProp(),
 		"table":   tableProp("to read"),
-		"columns": identifiers("The columns to answer, in this order. Leave it out for every column the login may read.", "A column name.", 1),
-		"where":   whereProp(0, "The filter: each entry is {column, op, value}, and a row must match every entry. Leave it out to read every row."),
-		"order_by": {Type: "array", Description: "The order of the rows, by column, first entry first.", MinItems: atLeast(1), Items: &jsonschema.Schema{
+		"columns": identifiers("Columns to return, in order. Omit for every column the login may select.", "A column name.", 1),
+		"where":   whereProp(0, "Conditions joined by AND. Omit to read every row."),
+		"order_by": {Type: "array", Description: "The sort order, first entry first.", MinItems: atLeast(1), Items: &jsonschema.Schema{
 			Type: "object",
 			Properties: map[string]*jsonschema.Schema{
 				"column":    identifier("The column to order by."),
-				"direction": {Type: "string", Description: "asc for ascending, which is the default, or desc for descending.", Enum: []any{"asc", "desc"}},
+				"direction": {Type: "string", Description: "asc or desc. Defaults to asc.", Enum: []any{"asc", "desc"}},
 			},
 			Required: []string{"column"}, AdditionalProperties: closed(), PropertyOrder: []string{"column", "direction"},
 		}},
-		"limit": {Type: "integer", Description: "The most rows to answer, from 1 to the row cap of " + count(int64(rows)) + ". Leave it out for the row cap.", Minimum: ptrTo(1.0), Maximum: &rows},
+		"limit": {Type: "integer", Description: "The most rows to return. Defaults to the row cap of " + count(int64(rows)) + ".", Minimum: ptrTo(1.0), Maximum: &rows},
 	}, []string{"schema", "table", "columns", "where", "order_by", "limit"}, "table")
-	description := "Reads rows of one table or view in a read-only transaction on the read login, with an optional filter, order and limit. " +
-		"It answers columns and rows, each row an array in column order. It answers at most " + count(int64(s.cfg.Limits.Rows)) + " rows and " +
-		count(int64(s.cfg.Limits.Bytes)) + " bytes, and truncated is true when more rows follow."
+	description := "Reads rows of one table or view, with an optional filter, order and limit. " +
+		"Returns at most " + count(int64(s.cfg.Limits.Rows)) + " rows and " + count(int64(s.cfg.Limits.Bytes)) + " bytes."
 	return &dataTool{tool: readTool(readRowsName, description, in), run: s.readRows}
 }
 
@@ -67,23 +66,21 @@ func (s *Server) aggregateTool() *dataTool {
 	in := s.input(map[string]*jsonschema.Schema{
 		"schema":   schemaProp(),
 		"table":    tableProp("to aggregate"),
-		"function": {Type: "string", Description: "The aggregate function: count, sum, avg, min or max.", Enum: []any{"count", "sum", "avg", "min", "max"}},
-		"column":   identifier("The column to aggregate. count may leave it out to count rows, and every other function needs it."),
-		"where":    whereProp(0, "The filter: each entry is {column, op, value}, and a row must match every entry. Leave it out to aggregate every row."),
-		"group_by": identifiers("The columns to group by. The answer has one row per group, ordered by these columns. Leave it out for one row.", "A column name.", 1),
+		"function": {Type: "string", Description: "The aggregate function.", Enum: []any{"count", "sum", "avg", "min", "max"}},
+		"column":   identifier("The column to aggregate. Required except for count, which counts rows without it."),
+		"where":    whereProp(0, "Conditions joined by AND. Omit to aggregate every row."),
+		"group_by": identifiers("Columns to group and order by. Omit for one row.", "A column name.", 1),
 	}, []string{"schema", "table", "function", "column", "where", "group_by"}, "table", "function")
-	description := "Computes count, sum, avg, min or max over one column of a table or view in a read-only transaction on the read login, with an optional filter and grouping. " +
-		"It answers columns and rows: the group_by columns and then the aggregate. It answers at most " + count(int64(s.cfg.Limits.Rows)) +
-		" groups, and truncated is true when more follow."
+	description := "Computes count, sum, avg, min or max over one table or view, with an optional filter and grouping. " +
+		"Returns at most " + count(int64(s.cfg.Limits.Rows)) + " groups."
 	return &dataTool{tool: readTool(aggregateName, description, in), run: s.aggregate}
 }
 
 // ptrTo returns a pointer to f, for the bounds of a schema.
 func ptrTo(f float64) *float64 { return &f }
 
-// readRows answers read_rows: SELECT of the columns from the table, with
-// the where filter, the order and LIMIT one past the limit, so that the
-// answer knows whether more rows follow.
+// readRows runs read_rows. It selects one row past the limit to learn whether
+// more rows exist.
 func (s *Server) readRows(ctx context.Context, c *call, raw map[string]any) *mcp.CallToolResult {
 	var args readRowsArgs
 	if err := c.decode(raw, &args); err != nil {
@@ -111,7 +108,7 @@ func (s *Server) readRows(ctx context.Context, c *call, raw map[string]any) *mcp
 			}
 		}
 		if len(selected) == 0 {
-			return nil, refuse("the read login of " + c.database + " may select no column of " + args.Schema + "." + args.Table + ", so read_rows is refused. Ask an administrator to grant SELECT on the columns it needs.")
+			return nil, refuse("the read login of " + c.database + " may select no column of " + args.Schema + "." + args.Table + ". Ask an administrator to grant SELECT on the columns to read.")
 		}
 		var q statement
 		q.add("SELECT ")
@@ -139,21 +136,19 @@ func (s *Server) readRows(ctx context.Context, c *call, raw map[string]any) *mcp
 		if err != nil && !errors.Is(err, errCut) {
 			return nil, err
 		}
-		text := "read_rows answered " + plural(int64(len(a.rows)), "row") + " of " + args.Schema + "." + args.Table + " on " + c.database + "."
+		text := "read_rows returned " + plural(int64(len(a.rows)), "row") + " of " + args.Schema + "." + args.Table + " on " + c.database + "."
 		return readAnswer(a, text+c.stopped(a, limit, "Narrow the where filter or the columns, or page with order_by and a where filter past the last row.")), err
 	})
 }
 
-// aggregate answers aggregate: SELECT of the group_by columns and the
-// function over the column, with the where filter, grouped and ordered by
-// the group_by columns.
+// aggregate runs aggregate. Groups come ordered by the group_by columns.
 func (s *Server) aggregate(ctx context.Context, c *call, raw map[string]any) *mcp.CallToolResult {
 	var args aggregateArgs
 	if err := c.decode(raw, &args); err != nil {
 		return toolError(err)
 	}
 	if args.Column == "" && args.Function != "count" {
-		return toolError(argError(c.tool, "the function "+args.Function+" needs the argument column, and the call leaves it out"))
+		return toolError(argError(c.tool, "the function "+args.Function+" needs the argument column"))
 	}
 	if err := checkWhere(c.tool, args.Where); err != nil {
 		return toolError(err)
@@ -199,7 +194,7 @@ func (s *Server) aggregate(ctx context.Context, c *call, raw map[string]any) *mc
 		if err != nil && !errors.Is(err, errCut) {
 			return nil, err
 		}
-		text := "aggregate answered " + args.Function + " of " + args.Schema + "." + args.Table + " on " + c.database
+		text := "aggregate returned " + args.Function + " of " + args.Schema + "." + args.Table + " on " + c.database
 		if len(args.GroupBy) > 0 {
 			text += " for " + plural(int64(len(a.rows)), "group")
 		} else if len(a.rows) == 1 && len(a.rows[0]) == 1 {
@@ -209,7 +204,7 @@ func (s *Server) aggregate(ctx context.Context, c *call, raw map[string]any) *mc
 	})
 }
 
-// valueOf writes one answered value for the text, such as 1240.
+// valueOf writes one returned value for the text, such as 1240.
 func valueOf(v any) string {
 	switch x := v.(type) {
 	case nil:

@@ -54,10 +54,10 @@ const helpdeskSingle = "  helpdesk:\n    login: { dsn_env: HELPDESK_DSN }\n"
 
 func TestWriteCap(t *testing.T) {
 	capped := func(tool, n, advice string) string {
-		return tool + " on helpdesk would change " + n + " rows and the cap is 100, so nothing was changed. " + advice + ", or ask an administrator to raise write_rows."
+		return tool + " on helpdesk would change " + n + " rows, over the cap of 100, and changed nothing. " + advice + ", or ask an administrator to raise limits.write_rows in server.yaml."
 	}
 	const narrow = "Narrow the where filter"
-	const elsewhere = "The statement changes rows in other tables through triggers or cascades, so narrow the call"
+	const elsewhere = "Triggers or cascades change rows in other tables, so narrow the call"
 	all := []any{map[string]any{"column": "id", "op": ">", "value": 0}}
 	var many []any
 	for i := range 101 {
@@ -71,7 +71,7 @@ func TestWriteCap(t *testing.T) {
 		{"update_rows over the cap", "update_rows", map[string]any{"database": "helpdesk", "table": "tickets", "set": map[string]any{"status": "closed"}, "where": all}, capped("update_rows", "1,240", narrow)},
 		{"delete_rows over the cap", "delete_rows", map[string]any{"database": "helpdesk", "table": "tickets", "where": all}, capped("delete_rows", "1,240", narrow)},
 		{"delete_rows over the cap with returning", "delete_rows", map[string]any{"database": "helpdesk", "table": "tickets", "where": all, "returning": []any{"id"}}, capped("delete_rows", "1,240", narrow)},
-		{"insert_rows over the cap", "insert_rows", map[string]any{"database": "helpdesk", "table": "tickets", "rows": many}, capped("insert_rows", "101", "Send at most 100 rows in one call")},
+		{"insert_rows over the cap", "insert_rows", map[string]any{"database": "helpdesk", "table": "tickets", "rows": many}, capped("insert_rows", "101", "Send at most 100 rows per call")},
 		{"execute_sql over the cap", "execute_sql", map[string]any{"database": "helpdesk", "sql": "UPDATE tickets SET status = 'closed'"}, capped("execute_sql", "1,240", "Narrow the statement")},
 		{"execute_sql that deletes in a WITH query", "execute_sql", map[string]any{"database": "helpdesk", "sql": "WITH gone AS (DELETE FROM tickets RETURNING 1) SELECT count(*) FROM gone"}, capped("execute_sql", "1,240", "Narrow the statement")},
 		{"execute_sql that deletes in a function", "execute_sql", map[string]any{"database": "helpdesk", "sql": "SELECT purge()"}, capped("execute_sql", "1,240", "Narrow the statement")},
@@ -164,13 +164,13 @@ func TestWriteTools(t *testing.T) {
 		args       map[string]any
 		want       string
 	}{
-		{"a table the write login may not use", "insert_rows", map[string]any{"table": "secrets", "rows": []any{map[string]any{"id": 1}}}, "insert_rows found no table public.secrets on helpdesk that its login may use, so the call is refused. Call list_tables to see the tables it may use."},
-		{"a table the write login may only read", "insert_rows", map[string]any{"schema": "audit", "table": "log", "rows": []any{map[string]any{"id": 1}}}, "insert_rows on helpdesk failed, because the server answered: permission denied for table log (SQLSTATE 42501), so nothing was changed. Correct the call as the reason says, and call it again."},
-		{"a key that is taken", "insert_rows", map[string]any{"table": "tickets", "rows": []any{map[string]any{"id": 1}}}, `insert_rows on helpdesk failed, because the server answered: duplicate key value violates unique constraint "tickets_pkey" (SQLSTATE 23505), so nothing was changed. Correct the call as the reason says, and call it again.`},
-		{"a column a row names that the table lacks", "insert_rows", map[string]any{"table": "tickets", "rows": []any{map[string]any{"id": 8, "nope": 1}}}, `public.tickets on helpdesk has no column "nope" that the login may use, so insert_rows is refused. Call describe_table to see its columns.`},
-		{"a set column the table lacks", "update_rows", map[string]any{"table": "tickets", "set": map[string]any{"nope": 1}, "where": in("id", 1)}, `public.tickets on helpdesk has no column "nope" that the login may use, so update_rows is refused. Call describe_table to see its columns.`},
-		{"a returning column the table lacks", "delete_rows", map[string]any{"table": "tickets", "where": in("id", 1), "returning": []any{"nope"}}, `public.tickets on helpdesk has no column "nope" that the login may use, so delete_rows is refused. Call describe_table to see its columns.`},
-		{"a read tool runs on the read login", "read_rows", map[string]any{"table": "drafts"}, "read_rows found no table public.drafts on helpdesk that its login may use, so the call is refused. Call list_tables to see the tables it may use."},
+		{"a table the write login may not use", "insert_rows", map[string]any{"table": "secrets", "rows": []any{map[string]any{"id": 1}}}, "insert_rows found no table public.secrets on helpdesk that its login may use. Call list_tables for the tables it may use."},
+		{"a table the write login may only read", "insert_rows", map[string]any{"schema": "audit", "table": "log", "rows": []any{map[string]any{"id": 1}}}, "insert_rows on helpdesk changed nothing, because Postgres said: permission denied for table log (SQLSTATE 42501). Correct the call and try again."},
+		{"a key that is taken", "insert_rows", map[string]any{"table": "tickets", "rows": []any{map[string]any{"id": 1}}}, `insert_rows on helpdesk changed nothing, because Postgres said: duplicate key value violates unique constraint "tickets_pkey" (SQLSTATE 23505). Correct the call and try again.`},
+		{"a column a row names that the table lacks", "insert_rows", map[string]any{"table": "tickets", "rows": []any{map[string]any{"id": 8, "nope": 1}}}, `public.tickets on helpdesk has no column "nope" that the login may use. Call describe_table to see its columns.`},
+		{"a set column the table lacks", "update_rows", map[string]any{"table": "tickets", "set": map[string]any{"nope": 1}, "where": in("id", 1)}, `public.tickets on helpdesk has no column "nope" that the login may use. Call describe_table to see its columns.`},
+		{"a returning column the table lacks", "delete_rows", map[string]any{"table": "tickets", "where": in("id", 1), "returning": []any{"nope"}}, `public.tickets on helpdesk has no column "nope" that the login may use. Call describe_table to see its columns.`},
+		{"a read tool runs on the read login", "read_rows", map[string]any{"table": "drafts"}, "read_rows found no table public.drafts on helpdesk that its login may use. Call list_tables for the tables it may use."},
 	}
 	for _, s := range pgtest.Servers(t) {
 		t.Run(s.String(), func(t *testing.T) {

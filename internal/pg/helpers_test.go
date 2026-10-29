@@ -9,7 +9,8 @@ import (
 	"github.com/strazahq/adaptive-pg-mcp/internal/config"
 )
 
-// dsnOf returns dsn as config holds it, through a server.yaml that names it in an environment variable.
+// dsnOf returns dsn as config holds it, through a server.yaml that names it
+// in an environment variable.
 func dsnOf(t *testing.T, dsn string) config.DSN {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "server.yaml")

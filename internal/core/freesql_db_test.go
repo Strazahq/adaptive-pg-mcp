@@ -11,7 +11,11 @@ import (
 
 func TestFreeSQL(t *testing.T) {
 	failed := func(tool, reason, done string) string {
-		return tool + " on helpdesk failed, because the server answered: " + reason + ", so nothing was " + done + ". Correct the call as the reason says, and call it again."
+		verb := " failed, because "
+		if done == "changed" {
+			verb = " changed nothing, because "
+		}
+		return tool + " on helpdesk" + verb + "Postgres said: " + reason + ". Correct the call and try again."
 	}
 	const two = "cannot insert multiple commands into a prepared statement (SQLSTATE 42601)"
 	answers := []struct {
@@ -19,10 +23,10 @@ func TestFreeSQL(t *testing.T) {
 		changed         any
 		rows, text      string
 	}{
-		{"query_sql reads", "query_sql", "SELECT id, status FROM tickets ORDER BY id", nil, `[[1,"open"],[2,"closed"],[3,"open"],[4,"pending"]]`, "query_sql answered 4 rows from helpdesk."},
+		{"query_sql reads", "query_sql", "SELECT id, status FROM tickets ORDER BY id", nil, `[[1,"open"],[2,"closed"],[3,"open"],[4,"pending"]]`, "query_sql returned 4 rows from helpdesk."},
 		{"query_sql names a type pgx does not know", "query_sql", "SELECT 'happy'::mood AS feeling", nil, `[["happy"]]`, ""},
-		{"execute_sql reads and changes nothing", "execute_sql", "SELECT count(*) FROM tickets", float64(0), `[[4]]`, "execute_sql changed 0 rows on helpdesk and answered 1 row."},
-		{"execute_sql inserts with returning", "execute_sql", "INSERT INTO tickets VALUES (9, 'open', 'x') RETURNING id", float64(1), `[[9]]`, "execute_sql changed 1 row on helpdesk and answered 1 row."},
+		{"execute_sql reads and changes nothing", "execute_sql", "SELECT count(*) FROM tickets", float64(0), `[[4]]`, "execute_sql changed 0 rows on helpdesk and returned 1 row."},
+		{"execute_sql inserts with returning", "execute_sql", "INSERT INTO tickets VALUES (9, 'open', 'x') RETURNING id", float64(1), `[[9]]`, "execute_sql changed 1 row on helpdesk and returned 1 row."},
 		{"execute_sql deletes in a WITH query under the cap", "execute_sql", "WITH gone AS (DELETE FROM tickets WHERE id = 9 RETURNING 1) SELECT count(*) FROM gone", float64(1), `[[1]]`, ""},
 	}
 	refusals := []struct {
@@ -34,7 +38,7 @@ func TestFreeSQL(t *testing.T) {
 		{"query_sql runs read-only", "query_sql", "DELETE FROM tickets", failed("query_sql", "cannot execute DELETE in a read-only transaction (SQLSTATE 25006)", "read")},
 		{"query_sql cannot switch to read-write", "query_sql", "SET TRANSACTION READ WRITE", failed("query_sql", "transaction read-write mode must be set before any query (SQLSTATE 25001)", "read")},
 		{"a procedure cannot commit inside the call's transaction", "execute_sql", "CALL wipe()", failed("execute_sql", "invalid transaction termination (SQLSTATE 2D000)", "changed")},
-		{"execute_sql refuses a change of structure", "execute_sql", "CREATE TABLE made (a int)", "execute_sql on helpdesk ran a statement whose command tag is CREATE TABLE, which the write cap cannot count, so it was rolled back and nothing was changed. Use execute_ddl for TRUNCATE and for statements that change structure."},
+		{"execute_sql refuses a change of structure", "execute_sql", "CREATE TABLE made (a int)", "execute_sql on helpdesk rolled back the statement with command tag CREATE TABLE, which the write cap cannot count. Use execute_ddl for TRUNCATE and changes of structure."},
 	}
 	for _, s := range pgtest.Servers(t) {
 		t.Run(s.String(), func(t *testing.T) {
@@ -98,7 +102,7 @@ func TestFreeSQL(t *testing.T) {
 				cs, out := served(t, l, d, "read", "{ rows: 2, bytes: 1048576, timeout: 30s, write_rows: 100 }")
 				res := callTool(t, cs, "query_sql", helpdesk(map[string]any{"sql": "SELECT g FROM generate_series(1, 100000) g"}), nil)
 				m := out.check(t, "query_sql", res)
-				want := "query_sql answered 2 rows from helpdesk. More rows follow, and the answer stopped at the row cap of 2. Add a LIMIT, or select fewer columns."
+				want := "query_sql returned 2 rows from helpdesk. More rows exist beyond the row cap of 2. Add a LIMIT, or select fewer columns."
 				if rowsJSON(t, m) != `[[1],[2]]` || m["truncated"] != true || textOf(t, res) != want {
 					t.Errorf("query_sql at a row cap of 2 answered %v %s", m, textOf(t, res))
 				}

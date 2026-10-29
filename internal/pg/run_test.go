@@ -16,7 +16,8 @@ import (
 	"github.com/strazahq/adaptive-pg-mcp/internal/pgtest"
 )
 
-// sqlState returns the SQLSTATE of a server error in err's chain, or empty.
+// sqlState returns the SQLSTATE of a Postgres error in err's chain, or
+// empty.
 func sqlState(err error) string {
 	var pe *pgconn.PgError
 	if errors.As(err, &pe) {
@@ -175,7 +176,7 @@ func TestRun(t *testing.T) {
 				if !errors.As(err, &e) || !e.Connect {
 					t.Fatalf("Run returned %v, want a connect *Error", err)
 				}
-				want := `the server answered: password authentication failed for user "` + l.Name + `" (SQLSTATE 28P01)`
+				want := `Postgres said: password authentication failed for user "` + l.Name + `" (SQLSTATE 28P01)`
 				if e.Error() != want {
 					t.Errorf("the reason:\n got %s\nwant %s", e.Error(), want)
 				}

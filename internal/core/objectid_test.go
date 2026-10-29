@@ -56,9 +56,9 @@ func checkOn(t *testing.T, srv *Server, meta mcp.Meta) string {
 
 const (
 	// recreated is the refusal of a call whose id is not the database's id now.
-	recreated = "the id of sales_eu differs from the one Straza listed, so the call is refused. The database was dropped and created again, or server.yaml now gives its name to another database. Try again once Straza lists the databases again, or ask an administrator to refresh the list."
+	recreated = "the id of sales_eu differs from the one Straza listed: the database was recreated, or server.yaml now gives its name to another database. Try again after Straza lists the databases again, or ask an administrator to refresh the list."
 	// notAString is the refusal of a call whose id is not a usable string.
-	notAString = "the call carries an ai.straza/object-id that is empty or not a string, so the call is refused. Straza sends the id that list_databases answered as a string, so send the call through Straza."
+	notAString = "the ai.straza/object-id of the call is empty or not a string. Send the call through Straza, which sets it from list_databases."
 )
 
 func TestTheIDReadsOnEveryLogin(t *testing.T) {
@@ -155,7 +155,7 @@ func TestIDCheck(t *testing.T) {
 				if _, err := d.Connect(t).Exec(t.Context(), "REVOKE EXECUTE ON FUNCTION pg_control_system() FROM PUBLIC"); err != nil {
 					t.Fatal(err)
 				}
-				want := "adaptive-pg-mcp cannot read the id of sales_eu to compare it with the ai.straza/object-id of the call, because the server answered: permission denied for function pg_control_system (SQLSTATE 42501), so the call is refused. Try again, and if it fails again, run adaptive-pg-mcp check to see why the login cannot read it."
+				want := "the id of sales_eu cannot be read to compare with the ai.straza/object-id of the call, because Postgres said: permission denied for function pg_control_system (SQLSTATE 42501). Try again, and if it fails again, run adaptive-pg-mcp check to see why."
 				if got := checkOn(t, again, mcp.Meta{objectIDKey: after}); got != want {
 					t.Errorf("checkObjectID:\n got %q\nwant %q", got, want)
 				}

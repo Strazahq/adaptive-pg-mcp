@@ -10,7 +10,9 @@ import (
 	"github.com/strazahq/adaptive-pg-mcp/internal/pgtest"
 )
 
-// TestHarness checks that each harness server runs its major version, and that NewDatabase and NewLogin make a database and a login that are gone after cleanup.
+// TestHarness checks that each harness server runs its major version, and
+// that NewDatabase and NewLogin make a database and a login that are gone
+// after cleanup.
 func TestHarness(t *testing.T) {
 	tests := []struct {
 		major int

@@ -16,29 +16,31 @@ import (
 	"github.com/strazahq/adaptive-pg-mcp/internal/pg"
 )
 
-// resultColumn is one column of an answer, as the output schema names it.
+// resultColumn is one column of a result, as the output schema names it.
 type resultColumn struct {
 	Name string `json:"name"`
 	Type string `json:"type"`
 }
 
-// collected is what a statement answered, within the row and byte caps.
+// collected is what a statement returned, within the row and byte caps.
 type collected struct {
 	columns []resultColumn
 	rows    [][]any
-	// more is true when the statement answered more rows than the answer holds.
+	// more is true when the statement returned more rows than collected holds.
 	more bool
-	// bytesFull is true when the byte cap stopped the answer, and false when the row cap did.
+	// bytesFull is true when the byte cap stopped the result, and false when
+	// the row cap did.
 	bytesFull bool
-	// tag is the command tag, which says how many rows a write changed. A read that stopped early has none.
+	// tag is the command tag, which says how many rows a write changed. A read
+	// that stopped early has none.
 	tag pgconn.CommandTag
 }
 
-// scan reads rows into an answer of at most maxRows rows within the byte
-// cap, and reads one row more to know whether more follow. A row counts
-// against the byte cap by the larger of its size on the wire and its JSON,
-// and its size on the wire is checked before it is decoded, so a row over
-// the cap is never decoded. pgx still receives that one row whole.
+// scan reads at most maxRows rows within the byte cap, and one row more to
+// learn whether more exist. A row counts against the byte cap by the larger
+// of its size on the wire and its JSON. The wire size is checked before the
+// row is decoded, so a row over the cap is never decoded, though pgx still
+// receives it whole.
 func (c *call) scan(rows pgx.Rows, maxRows int) (collected, error) {
 	fields := rows.FieldDescriptions()
 	types := rows.Conn().TypeMap()
@@ -103,14 +105,13 @@ func (c *call) collect(ctx context.Context, tx *pg.Tx, rows pgx.Rows, maxRows in
 
 // errCut ends the transaction of a read that stopped its statement at the
 // cap. The transaction rolls back, which changes nothing for a read, and the
-// answer stands.
+// result stands.
 var errCut = errors.New("the read stopped its statement at the row or byte cap")
 
 // read sends a read statement and reads its rows within the caps. When a
-// cap stops the answer, read cancels the statement instead of reading the
-// rest of the result, which a read does not need. pgx stops a statement
-// only by closing its connection, so the connection is discarded, and the
-// answer comes with errCut, which the call returns as its answer. The type
+// cap stops the result, read cancels the statement instead of reading the
+// rest. pgx cancels a statement only by closing its connection, so the
+// connection is discarded and read returns the rows with errCut. The type
 // names that need a query are then read after the transaction.
 func (c *call) read(ctx context.Context, tx *pg.Tx, maxRows int, sql string, args ...any) (collected, error) {
 	statement, stop := context.WithCancel(ctx)
@@ -141,7 +142,7 @@ func (c *call) read(ctx context.Context, tx *pg.Tx, maxRows int, sql string, arg
 	return a, nameTypes(ctx, tx, cols, unknown)
 }
 
-// jsonValue turns one value of a result into its JSON value in the answer.
+// jsonValue turns one value of a result into its JSON value.
 // Booleans, integers, finite floats and numerics are JSON numbers and
 // booleans, json and jsonb are their JSON as Postgres holds it, dates and
 // timestamps are ISO 8601 strings, with timestamptz in UTC, and every other
@@ -187,7 +188,8 @@ func jsonValue(types *pgtype.Map, f pgconn.FieldDescription, raw []byte, v any) 
 	return string(b), nil
 }
 
-// finite is f as a JSON number, or as the text Postgres writes for NaN and the infinities, which JSON has no number for.
+// finite is f as a JSON number, or as the text Postgres writes for NaN and the
+// infinities, which JSON has no number for.
 func finite(f float64) any {
 	switch {
 	case math.IsNaN(f):
@@ -200,16 +202,19 @@ func finite(f float64) any {
 	return f
 }
 
-// typeNamesSQL reads the type names of OIDs that pgx does not know, such as an enum.
+// typeNamesSQL reads the type names of OIDs that pgx does not know, such as an
+// enum.
 const typeNamesSQL = `SELECT t.oid::int8, t.typname::text FROM pg_type t WHERE t.oid::int8 = ANY($1)`
 
-// untypedColumn is a result column whose type pgx does not know, by its place and its type OID.
+// untypedColumn is a result column whose type pgx does not know, by its
+// place and its type OID.
 type untypedColumn struct {
 	at  int
 	oid int64
 }
 
-// knownTypes names each result column, and its Postgres type when pgx knows it, and lists the columns whose type needs a query.
+// knownTypes names each result column, and its Postgres type when pgx knows
+// it, and lists the columns whose type needs a query.
 func knownTypes(types *pgtype.Map, fields []pgconn.FieldDescription) ([]resultColumn, []untypedColumn) {
 	cols := make([]resultColumn, len(fields))
 	var unknown []untypedColumn
@@ -224,7 +229,8 @@ func knownTypes(types *pgtype.Map, fields []pgconn.FieldDescription) ([]resultCo
 	return cols, unknown
 }
 
-// nameTypes reads the names of the unknown types on tx into cols, and writes oid and the number for a type pg_type does not hold.
+// nameTypes reads the names of the unknown types on tx into cols, and writes
+// oid and the number for a type that pg_type does not hold.
 func nameTypes(ctx context.Context, tx *pg.Tx, cols []resultColumn, unknown []untypedColumn) error {
 	if len(unknown) == 0 {
 		return nil

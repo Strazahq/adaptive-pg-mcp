@@ -6,30 +6,31 @@ import (
 	"strings"
 )
 
-// namePrefix starts the line that starts a statement and names its tool, as in -- name: revenue_by_region.
+// namePrefix starts the line that names a statement, as in
+// -- name: revenue_by_region.
 const namePrefix = "-- name:"
 
-// statement is one statement of a .sql file, from its name line to the next one or the end of the file.
+// statement is one statement of a .sql file, from its name line to the next
+// one or the end of the file.
 type statement struct {
-	// name is the tool name its name line gives.
+	// name is the tool name from the name line.
 	name string
-	// file is the .sql file relative to the catalog folder, with slashes, such as finance/revenue.sql.
+	// file is the .sql file relative to the catalog folder, with slashes,
+	// such as finance/revenue.sql.
 	file string
-	// line is the line of its name line, from 1.
+	// line is the 1-based line number of the name line.
 	line int
-	// sql is the text below the name line, without the white space around it.
+	// sql is the text below the name line, trimmed of white space.
 	sql string
-	// listed is true once an index entry joins the statement.
+	// listed is true once a tool in tools.yaml uses the statement.
 	listed bool
 }
 
-// splitStatements splits the text of the .sql file at file into its
-// statements. Each starts at a line that reads -- name: and the tool name,
-// with white space around it allowed, and runs to the next such line or to
-// the end of the file. Text before the first name line may hold only
-// comments and white space, and every statement must hold SQL that does not
-// start with a semicolon. A byte order
-// mark that an editor wrote at the start of the file is not part of the text.
+// splitStatements splits the text of the .sql file at file into statements.
+// Each starts at a -- name: line and runs to the next one or the end of the
+// file. Text before the first name line may hold only comments and white
+// space, and each statement must hold SQL that does not start with a
+// semicolon. A byte order mark at the start of the file is dropped.
 func splitStatements(file, text string) ([]*statement, error) {
 	text = strings.TrimPrefix(text, "\ufeff")
 	var out []*statement
@@ -42,10 +43,10 @@ func splitStatements(file, text string) ([]*statement, error) {
 		cur.sql = strings.TrimSpace(strings.Join(body, "\n"))
 		at := firstSQL(cur.sql)
 		if at < 0 {
-			return errors.New(file + " statement " + cur.name + " on line " + strconv.Itoa(cur.line) + " holds no SQL, only comments or blank lines. Write the statement below its -- name: line, or remove the line.")
+			return errors.New(file + " statement " + cur.name + " on line " + strconv.Itoa(cur.line) + " has no SQL. Write the statement below its -- name: line, or remove the line.")
 		}
 		if cur.sql[at] == ';' {
-			return errors.New(file + " statement " + cur.name + " on line " + strconv.Itoa(cur.line) + " starts with a semicolon, which would cut the statement off from the EXPLAIN that the start checks put before it to check its grants. Remove the semicolon at the start of the statement.")
+			return errors.New(file + " statement " + cur.name + " on line " + strconv.Itoa(cur.line) + " starts with a semicolon, which would split it from the EXPLAIN that checks its grants. Remove the semicolon.")
 		}
 		out = append(out, cur)
 		body = nil
@@ -70,7 +71,7 @@ func splitStatements(file, text string) ([]*statement, error) {
 		}
 		name := strings.TrimSpace(rest)
 		if name == "" {
-			return nil, errors.New(file + " line " + strconv.Itoa(i+1) + " has a -- name: line without a name. Write the tool name after it, such as -- name: revenue_by_region.")
+			return nil, errors.New(file + " line " + strconv.Itoa(i+1) + " has a -- name: line without a name. Add the tool name, such as -- name: revenue_by_region.")
 		}
 		cur = &statement{name: name, file: file, line: i + 1}
 	}
@@ -80,7 +81,8 @@ func splitStatements(file, text string) ([]*statement, error) {
 	return out, end()
 }
 
-// preambleSQL refuses the lines before the first name line of file when they hold SQL, and names the line where it starts.
+// preambleSQL refuses the lines before the first name line of file when they
+// hold SQL, and names the line where the SQL starts.
 func preambleSQL(file string, lines []string) error {
 	text := strings.Join(lines, "\n")
 	at := firstSQL(text)
@@ -88,14 +90,12 @@ func preambleSQL(file string, lines []string) error {
 		return nil
 	}
 	line := 1 + strings.Count(text[:at], "\n")
-	return errors.New(file + " line " + strconv.Itoa(line) + " holds SQL before the first -- name: line, so it belongs to no tool. Put a -- name: line before it, or remove it.")
+	return errors.New(file + " line " + strconv.Itoa(line) + " has SQL before the first -- name: line. Add a -- name: line above it, or remove it.")
 }
 
-// firstSQL returns the byte offset of the first character of text that is
-// neither white space nor part of a comment, or -1 when text holds only
-// comments and white space. A -- comment runs to the next line feed or
-// carriage return, as Postgres ends it, and a
-// /* comment runs to its matching */, nested as Postgres nests them. A /*
+// firstSQL returns the byte offset of the first character of text outside
+// white space and comments, or -1 when there is none. As in Postgres, a --
+// comment ends at a line feed or carriage return, and /* comments nest. A /*
 // comment that never closes counts as SQL, because Postgres refuses it.
 func firstSQL(text string) int {
 	for i := 0; i < len(text); {
@@ -121,7 +121,8 @@ func firstSQL(text string) int {
 	return -1
 }
 
-// commentEnd returns the offset just past the */ that closes the /* comment at start, or -1 when it never closes.
+// commentEnd returns the offset just past the */ that closes the /* comment
+// at start, or -1 when it never closes.
 func commentEnd(text string, start int) int {
 	depth := 0
 	for i := start; i+1 < len(text); {

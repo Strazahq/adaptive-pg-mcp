@@ -105,8 +105,8 @@ func TestMatchComparesEveryHash(t *testing.T) {
 
 func TestAuthenticate(t *testing.T) {
 	const (
-		missing = "the request carries no bearer token, so adaptive-pg-mcp refused it. Send the header Authorization: Bearer followed by the token issued for this server.\n"
-		invalid = "the bearer token of the request is malformed or not one this server knows, so adaptive-pg-mcp refused it. Send the token issued for this server, once, after Bearer.\n"
+		missing = "the request has no bearer token. Send the header Authorization: Bearer followed by the token issued for this server.\n"
+		invalid = "the bearer token is malformed or unknown to this server. Send the token issued for this server, once, after Bearer.\n"
 	)
 	cases := []struct {
 		name      string

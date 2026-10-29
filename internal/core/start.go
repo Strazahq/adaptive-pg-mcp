@@ -18,30 +18,30 @@ import (
 // loginTimeout bounds the connect and the checks of one login at start.
 const loginTimeout = 30 * time.Second
 
-// Finding is one line of what the start checks found.
+// Finding is one result of the start checks.
 type Finding struct {
-	// Refuses is true when the finding stops serve from starting and makes check fail.
+	// Refuses is true when the finding stops serve and makes check fail.
 	Refuses bool
-	// Text is the sentence for the operator.
+	// Text is the message for the operator.
 	Text string
 }
 
-// loginRef is one login of one database, as the start checks run on it and as sentences name it.
+// loginRef is one login of one database as the start checks see it.
 type loginRef struct {
 	// db is the config name of the database.
 	db string
-	// role is the login's name in logins. A database with one login holds it as read.
+	// role is the key of the login under logins. A database with one login
+	// has it as read.
 	role string
 	// roles are the logins of the database that share this login's pool.
 	roles []string
-	// label names the login in a sentence, such as the login of sales_eu.
+	// label names the login in messages, such as "the login of sales_eu".
 	label string
-	// login is the login as config holds it.
 	login config.Login
 }
 
-// loginsOf lists the logins of a database in the order the checks run: one
-// login, or read, write and then the others by name.
+// loginsOf lists the logins of a database in the order the checks run: the
+// one login, or read, write and then the others by name.
 func loginsOf(name string, db config.Database) []loginRef {
 	read, write := db.Logins["read"], db.Logins["write"]
 	if len(db.Logins) == 2 && read.Env == write.Env {
@@ -60,24 +60,26 @@ func loginsOf(name string, db config.Database) []loginRef {
 	return refs
 }
 
-// posture is what the start checks read about one login on one connection.
+// posture is what the start checks read about one login.
 type posture struct {
 	super, bypassRLS, createRole bool
-	// superRole is a superuser role the login is a member of, and can switch to, or empty.
+	// superRole is a superuser role the login can switch to, or empty.
 	superRole string
-	// serverRoles are the roles the login is a member of that reach the server's programs or files.
+	// serverRoles are the roles for server files and programs that the login
+	// is a member of.
 	serverRoles []string
-	// extensions are the extensions installed in the database that reach other databases.
+	// extensions are the installed extensions that reach other databases.
 	extensions []string
-	// tables and writable count the tables of the database, and those the login can write to.
+	// tables counts the tables of the database, and writable those the login
+	// can write to.
 	tables, writable int64
 }
 
-// postureSQL reads the posture of the login of the connection. It reads the
-// attributes of the session's own login, because a call can return to it
-// from any role it switches to, and it counts a table as writable when the
-// login may use its schema and holds any write privilege on it or on one of
-// its columns.
+// postureSQL reads the posture of the session's login. It reads
+// session_user, not current_user, because a call can always return to the
+// session's login with RESET ROLE. A table counts as writable when the login
+// has USAGE on its schema and any write privilege on the table or one of its
+// columns.
 const postureSQL = `SELECT s.rolsuper, s.rolbypassrls, s.rolcreaterole,
   coalesce((SELECT min(r.rolname::text) FROM pg_roles r
             WHERE r.rolsuper AND r.oid <> s.oid AND pg_has_role(s.oid, r.oid, 'MEMBER')), ''),
@@ -105,13 +107,11 @@ type loginResult struct {
 	findings []Finding
 }
 
-// Check opens a pool for every login of every database, connects to each,
-// and runs the start checks of docs/DESIGN.md section 6, and then the
-// catalog check, which serves each catalog tool that passes. It returns what
-// they found, the logins in the order of the config and then the catalog,
-// and keeps the pools open for serving until Close. A login that cannot
-// connect refuses the start, because a check that cannot run is a check that
-// never happened. The TLS check runs before all of them, and its findings come first.
+// Check opens a pool for every login of every database and runs the start
+// checks of docs/DESIGN.md section 6: TLS first, then each database in name
+// order, then the catalog, whose passing tools it serves. It returns the
+// findings in that order and keeps the pools open until Close. A login that
+// cannot connect refuses the start, because its checks cannot run.
 func (s *Server) Check(ctx context.Context) []Finding {
 	s.Close()
 	s.pools = pg.NewPools()
@@ -129,19 +129,17 @@ func (s *Server) Check(ctx context.Context) []Finding {
 	return append(findings, s.checkCatalog(ctx, ready)...)
 }
 
-// Close closes the pools that Check opened, if any. A call that still runs
-// afterwards gets no connection and answers a tool error.
+// Close closes the pools that Check opened, if any. A call that runs
+// afterwards gets no connection and returns a tool error.
 func (s *Server) Close() {
 	if s.pools != nil {
 		s.pools.Close()
 	}
 }
 
-// checkDatabase checks every login of one database and then the database
-// itself, and returns the findings and what the checks of each login found.
-// Every login of a database with more than one must reach the database of
-// its read login, by the id, or the start is refused, because
-// list_databases names the read login's database.
+// checkDatabase checks every login of one database, then the database. Every
+// login must reach the same database as the read login, compared by id,
+// because list_databases names the read login's database.
 func (s *Server) checkDatabase(ctx context.Context, name string, db config.Database) ([]Finding, []loginResult) {
 	var results []loginResult
 	var findings []Finding
@@ -155,33 +153,32 @@ func (s *Server) checkDatabase(ctx context.Context, name string, db config.Datab
 	read := results[0]
 	for _, r := range results[1:] {
 		if read.id != "" && r.id != "" && r.id != read.id {
-			findings = append(findings, Finding{Refuses: true, Text: r.ref.label + " reaches another database than " + read.ref.label + ", and its calls would change a database that list_databases does not name, so adaptive-pg-mcp will not start. Point the connection strings in " + r.ref.login.Env + " and " + read.ref.login.Env + " at the same database."})
+			findings = append(findings, Finding{Refuses: true, Text: r.ref.label + " reaches a different database than " + read.ref.label + ". Point " + r.ref.login.Env + " and " + read.ref.login.Env + " at the same database."})
 		}
 	}
 	return findings, results
 }
 
-// idGrant is what restores the read of a database id to a login.
-const idGrant = " Grant EXECUTE on the function pg_control_system() to the login, or restore the default grant to PUBLIC."
+// idGrant is the fix for a login that cannot read the database id.
+const idGrant = " Grant EXECUTE on pg_control_system() to the login, or restore its default grant to PUBLIC."
 
-// unreadableID is the finding about a login whose checks ran but that cannot
-// read the id of its database. A database with one login is reported,
-// because nothing needs comparing. In a database with more than one, it
-// refuses the start, because the logins cannot be compared with the read
-// login, and a check that cannot run is a check that never happened.
+// unreadableID is the finding for a login that cannot read its database id.
+// With one login it is a report, since there is nothing to compare. With
+// more, it refuses the start, because the logins cannot be compared with the
+// read login.
 func unreadableID(ref loginRef, alone bool, reason string) Finding {
 	cannot := ref.label + " cannot read the id of " + ref.db + ", because " + reason
 	switch {
 	case alone:
-		return Finding{Text: cannot + ", so list_databases fails and every call that carries an " + objectIDKey + " is refused on this login." + idGrant}
+		return Finding{Text: cannot + ". list_databases fails, and so does every call that carries " + objectIDKey + "." + idGrant}
 	case ref.role == "read":
-		return Finding{Refuses: true, Text: cannot + ", and without it adaptive-pg-mcp cannot check that the other logins of " + ref.db + " reach the same database, so adaptive-pg-mcp will not start." + idGrant}
+		return Finding{Refuses: true, Text: cannot + ". Without it, adaptive-pg-mcp cannot check that every login of " + ref.db + " reaches the same database." + idGrant}
 	}
-	return Finding{Refuses: true, Text: cannot + ", and without it adaptive-pg-mcp cannot check that the login reaches the same database as the read login of " + ref.db + ", so adaptive-pg-mcp will not start." + idGrant}
+	return Finding{Refuses: true, Text: cannot + ". Without it, adaptive-pg-mcp cannot check that this login reaches the same database as the read login." + idGrant}
 }
 
-// checkLogin connects to one login and reads its posture and the database
-// id on it. alone is true when the login is the only one of its database.
+// checkLogin connects one login and reads its posture and the database id.
+// alone is true when the login is the only one of its database.
 func (s *Server) checkLogin(ctx context.Context, ref loginRef, db config.Database, alone bool) loginResult {
 	r := loginResult{ref: ref}
 	logins := make([]pg.Login, len(ref.roles))
@@ -189,7 +186,7 @@ func (s *Server) checkLogin(ctx context.Context, ref loginRef, db config.Databas
 		logins[i] = pg.Login{Database: ref.db, Role: role}
 	}
 	if err := s.pools.Add(ref.login.DSN, logins...); err != nil {
-		r.findings = append(r.findings, Finding{Refuses: true, Text: "the connection string in " + ref.login.Env + " for " + ref.label + " cannot be used, because " + err.Error() + ", so adaptive-pg-mcp will not start. Correct it in the environment the server starts with. It is not repeated here, because it may hold a password."})
+		r.findings = append(r.findings, Finding{Refuses: true, Text: "the connection string in " + ref.login.Env + " for " + ref.label + " cannot be used, because " + err.Error() + ". Correct it in the server's environment."})
 		return r
 	}
 	ctx, cancel := context.WithTimeout(ctx, loginTimeout)
@@ -204,11 +201,11 @@ func (s *Server) checkLogin(ctx context.Context, ref loginRef, db config.Databas
 		return exactlyOne(rows, &p.super, &p.bypassRLS, &p.createRole, &p.superRole, &p.serverRoles, &p.extensions, &p.tables, &p.writable)
 	})
 	if e := (*pg.Error)(nil); errors.As(err, &e) && e.Connect {
-		r.findings = append(r.findings, Finding{Refuses: true, Text: ref.label + " cannot connect, because " + e.Reason + ", so adaptive-pg-mcp will not start. Check the connection string in " + ref.login.Env + ", and that the database server is up and accepts the login."})
+		r.findings = append(r.findings, Finding{Refuses: true, Text: ref.label + " cannot connect, because " + e.Reason + ". Check the connection string in " + ref.login.Env + ", and that Postgres is up and accepts the login."})
 		return r
 	}
 	if err != nil {
-		r.findings = append(r.findings, Finding{Refuses: true, Text: "the start checks cannot run on " + ref.label + ", because " + s.pools.Reason(err) + ", so adaptive-pg-mcp will not start. Check that the login may read pg_roles, pg_extension and pg_class, as every login may by default."})
+		r.findings = append(r.findings, Finding{Refuses: true, Text: "the start checks cannot run on " + ref.label + ", because " + s.pools.Reason(err) + ". The login must be able to read pg_roles, pg_extension and pg_class, as every login can by default."})
 		return r
 	}
 	r.posture = &p
@@ -227,24 +224,24 @@ func (s *Server) loginFindings(ref loginRef, db config.Database, p posture) []Fi
 	freeSQL := s.cfg.FreeSQL != config.FreeSQLOff
 	switch {
 	case p.super && freeSQL && !db.AllowSuperuser:
-		fs = append(fs, Finding{Refuses: true, Text: ref.label + " is a superuser and free SQL is on, so adaptive-pg-mcp will not start. Use a login without superuser, turn free_sql off, or set allow_superuser: true for " + ref.db + "."})
+		fs = append(fs, Finding{Refuses: true, Text: ref.label + " is a superuser and free SQL is on. Use a login without superuser, turn free_sql off, or set allow_superuser: true for " + ref.db + "."})
 	case p.super && freeSQL:
-		fs = append(fs, Finding{Text: ref.label + " is a superuser and free SQL is on, which allow_superuser: true accepts for " + ref.db + ". A superuser's free SQL is not limited to the database, so a login without superuser is the safer setup."})
+		fs = append(fs, Finding{Text: ref.label + " is a superuser and free SQL is on, which allow_superuser: true accepts for " + ref.db + ". Its free SQL is not confined to " + ref.db + "."})
 	case p.super:
-		fs = append(fs, Finding{Text: ref.label + " is a superuser, so no grant of the database limits its calls. A login without superuser adds the database's own lock."})
+		fs = append(fs, Finding{Text: ref.label + " is a superuser, so no grant restricts its calls. A login without superuser is held to the database's grants."})
 	case p.superRole != "" && freeSQL && !db.AllowSuperuser:
-		fs = append(fs, Finding{Refuses: true, Text: ref.label + " can switch to the superuser role " + p.superRole + " and free SQL is on, so adaptive-pg-mcp will not start. Use a login that is not a member of a superuser role, turn free_sql off, or set allow_superuser: true for " + ref.db + "."})
+		fs = append(fs, Finding{Refuses: true, Text: ref.label + " can switch to the superuser role " + p.superRole + " and free SQL is on. Use a login that is not a member of a superuser role, turn free_sql off, or set allow_superuser: true for " + ref.db + "."})
 	case p.superRole != "" && freeSQL:
-		fs = append(fs, Finding{Text: ref.label + " can switch to the superuser role " + p.superRole + " and free SQL is on, which allow_superuser: true accepts for " + ref.db + ". A superuser's free SQL is not limited to the database, so a login without that membership is the safer setup."})
+		fs = append(fs, Finding{Text: ref.label + " can switch to the superuser role " + p.superRole + " and free SQL is on, which allow_superuser: true accepts for " + ref.db + ". Its free SQL is not confined to " + ref.db + "."})
 	}
 	if p.bypassRLS && !p.super {
-		fs = append(fs, Finding{Text: ref.label + " has BYPASSRLS, so no row-level security policy limits what its calls read or change. A login without BYPASSRLS keeps the policies in force."})
+		fs = append(fs, Finding{Text: ref.label + " has BYPASSRLS, so row-level security policies do not apply to its calls. A login without BYPASSRLS keeps them in force."})
 	}
 	if p.createRole && !p.super && freeSQL {
-		fs = append(fs, Finding{Text: ref.label + " has CREATEROLE and free SQL is on, so a call can create and change roles of the whole database server, not only of " + ref.db + ". A login without CREATEROLE removes that reach."})
+		fs = append(fs, Finding{Text: ref.label + " has CREATEROLE and free SQL is on, so a call can create and change roles server-wide. Use a login without CREATEROLE."})
 	}
 	if len(p.serverRoles) > 0 && !p.super && freeSQL {
-		fs = append(fs, Finding{Text: ref.label + " is a member of " + joinAnd(p.serverRoles) + ", and free SQL is on, so a call can reach the programs or files of the database server, not only " + ref.db + ". A login without that membership removes that reach."})
+		fs = append(fs, Finding{Text: ref.label + " is a member of " + joinAnd(p.serverRoles) + ", and free SQL is on, so a call can reach files or programs on the database host. Use a login without that membership."})
 	}
 	if ref.role == "read" && p.writable > 0 {
 		fs = append(fs, Finding{Text: writesWhereItReads(ref, p)})
@@ -252,27 +249,27 @@ func (s *Server) loginFindings(ref loginRef, db config.Database, p posture) []Fi
 	return fs
 }
 
-// writesWhereItReads is the report about a login whose reads run where it can also write.
+// writesWhereItReads is the report for a read login that can also write.
 func writesWhereItReads(ref loginRef, p posture) string {
-	advice := " A separate read login with SELECT only adds the database's own lock."
+	advice := " A separate read login with only SELECT adds Postgres grants as a second check."
 	if len(ref.roles) == 1 {
-		advice = " Granting it SELECT only adds the database's own lock."
+		advice = " Granting it only SELECT adds Postgres grants as a second check."
 	}
 	switch {
 	case p.tables == 1:
-		return ref.label + " can write to its only table, so its read tools rely on read-only transactions alone." + advice
+		return ref.label + " can write to its only table, so the read tools rely on read-only transactions alone." + advice
 	case p.writable == p.tables:
-		return ref.label + " can write to all " + count(p.tables) + " tables, so its read tools rely on read-only transactions alone." + advice
+		return ref.label + " can write to all " + count(p.tables) + " tables, so the read tools rely on read-only transactions alone." + advice
 	default:
-		return ref.label + " can write to " + count(p.writable) + " of its " + count(p.tables) + " tables, so on those its read tools rely on read-only transactions alone." + advice
+		return ref.label + " can write to " + count(p.writable) + " of its " + count(p.tables) + " tables, so on those tables the read tools rely on read-only transactions alone." + advice
 	}
 }
 
-// crossDatabases checks every login whose posture was read for dblink or
-// postgres_fdw, because every database a login reaches is one a call can
-// touch. It says so once per database: a login whose database has the same
-// id as one already named is skipped, and so is a login whose id is unknown
-// once a finding stands, since it may reach that same database.
+// crossDatabases reports dblink or postgres_fdw once per database that the
+// logins reach. A login is skipped when its id was already reported. Once a
+// finding stands, a login with an unknown id is skipped, and so is every
+// login after a finding for an unknown id, since either may be the same
+// database.
 func crossDatabases(name string, db config.Database, results []loginResult) []Finding {
 	var findings []Finding
 	named := map[string]bool{}
@@ -292,8 +289,8 @@ func crossDatabases(name string, db config.Database, results []loginResult) []Fi
 }
 
 // crossDatabase reports dblink or postgres_fdw on the database of one login,
-// and refuses the start unless allow_cross_database accepts them. The first
-// login of a database speaks for the database, and any other login is named.
+// and refuses the start unless allow_cross_database accepts them. The finding
+// for the first login names the database, and for any other the login.
 func crossDatabase(name string, db config.Database, r loginResult, first bool) Finding {
 	installed := joinAnd(r.posture.extensions) + " installed"
 	subject, from := name+" has "+installed, name
@@ -307,10 +304,11 @@ func crossDatabase(name string, db config.Database, r loginResult, first bool) F
 	if len(r.posture.extensions) > 1 {
 		verb, them = "let", "the extensions"
 	}
-	return Finding{Refuses: true, Text: subject + ", which " + verb + " a call reach another database, so adaptive-pg-mcp will not start. Drop " + them + " from " + from + ", or set allow_cross_database: true for " + name + "."}
+	return Finding{Refuses: true, Text: subject + ", which " + verb + " a call reach another database. Drop " + them + " from " + from + ", or set allow_cross_database: true for " + name + "."}
 }
 
-// exactlyOne scans the one row of rows into dest, and fails when there is no row or more than one.
+// exactlyOne scans the one row of rows into dest, and fails when there is
+// no row or more than one.
 func exactlyOne(rows pgx.Rows, dest ...any) error {
 	_, err := pgx.CollectExactlyOneRow(rows, func(row pgx.CollectableRow) (struct{}, error) {
 		return struct{}{}, row.Scan(dest...)
@@ -326,7 +324,8 @@ func joinAnd(names []string) string {
 	return strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1]
 }
 
-// count writes n with a comma between each group of three digits, such as 1,240.
+// count writes n with a comma between each group of three digits, such as
+// 1,240.
 func count(n int64) string {
 	s := strconv.FormatInt(n, 10)
 	for i := len(s) - 3; i > 0; i -= 3 {

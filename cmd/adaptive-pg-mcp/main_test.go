@@ -30,9 +30,10 @@ import (
 )
 
 const (
-	// password is the known password the secrets test hides in a connection string.
+	// password is the known password the secrets test hides in a connection
+	// string.
 	password = "pw-9c41-must-never-print"
-	// knownToken is the known token of support_bot in the test config, made of plain words.
+	// knownToken is the token of support_bot in the test config.
 	knownToken = "apm_known-token-of-the-secrets-test-000000000"
 )
 
@@ -63,7 +64,8 @@ func (s *syncBuffer) String() string {
 	return s.b.String()
 }
 
-// writeConfig writes server.yaml and access.yaml into a fresh folder and returns the path of server.yaml.
+// writeConfig writes server.yaml and access.yaml into a fresh folder and
+// returns the path of server.yaml.
 func writeConfig(t *testing.T, listen, extra string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -135,7 +137,8 @@ func writePair(t *testing.T, dir, name string, notAfter time.Time) *x509.Certifi
 	return leaf
 }
 
-// keyLines returns the lines of the PEM file at path that carry key material, the base64 between its markers.
+// keyLines returns the base64 lines between the markers of the PEM file at
+// path, which carry the key material.
 func keyLines(t *testing.T, path string) []string {
 	t.Helper()
 	data, err := os.ReadFile(path)
@@ -151,7 +154,8 @@ func keyLines(t *testing.T, path string) []string {
 	return lines
 }
 
-// environ holds a connection string for every login, the first with the known password.
+// environ holds a connection string with the known password for every
+// login, and token in ADAPTIVE_PG_MCP_TOKEN.
 func environ(token string) map[string]string {
 	return map[string]string{
 		"SALES_EU_DSN":          "postgres://sales:" + password + "@db.example.internal/sales_eu",
@@ -188,7 +192,7 @@ func TestTokenPrintsATokenAndItsHash(t *testing.T) {
 
 func TestServeOnStdioRefusesAMissingOrWrongToken(t *testing.T) {
 	cases := []struct{ name, token, want string }{
-		{"missing", "", "ADAPTIVE_PG_MCP_TOKEN is not set, and on stdio adaptive-pg-mcp needs it to know who calls, so it will not start."},
+		{"missing", "", "ADAPTIVE_PG_MCP_TOKEN is not set, so adaptive-pg-mcp cannot tell who calls on stdio and will not start."},
 		{"wrong", knownToken + "x", "the token in ADAPTIVE_PG_MCP_TOKEN matches no configured hash, so adaptive-pg-mcp will not start."},
 	}
 	path := writeConfig(t, "stdio", "")
@@ -210,7 +214,7 @@ func TestSecretsStayOutOfLogsAndErrors(t *testing.T) {
 	var seen strings.Builder
 	keep := func(s string) { seen.WriteString(s + "\n") }
 
-	// Config loading, and its failures while the connection strings are set.
+	// Load, and its refusals while the connection strings are set.
 	good := writeConfig(t, "127.0.0.1:0", "")
 	cfg, err := config.Load(good, lookup(environ(knownToken)))
 	if err != nil {
@@ -235,12 +239,12 @@ func TestSecretsStayOutOfLogsAndErrors(t *testing.T) {
 		}
 	}
 
-	// Serve start-up on stdio with a wrong token, which is the known one changed.
+	// serve on stdio with the known token changed.
 	var out, errs bytes.Buffer
 	run(context.Background(), []string{"serve", "-config", writeConfig(t, "stdio", "")}, &out, &errs, lookup(environ(knownToken+"!")))
 	keep(errs.String() + out.String())
 
-	// Check and serve on HTTP, while no database of the connection strings can be reached.
+	// check and serve on HTTP while no database can be reached.
 	for _, args := range [][]string{{"check", "-config", good}, {"serve", "-config", good}} {
 		var out, errs bytes.Buffer
 		if code := run(context.Background(), args, &out, &errs, lookup(environ(knownToken))); code != 1 {
@@ -249,7 +253,8 @@ func TestSecretsStayOutOfLogsAndErrors(t *testing.T) {
 		keep(errs.String() + out.String())
 	}
 
-	// Check and serve with a TLS pair, and check with the key of another certificate, while no database can be reached.
+	// check and serve with a TLS pair, and check with the key of another
+	// certificate, while no database can be reached.
 	withTLS := writeConfig(t, "127.0.0.1:0", "tls: { cert_file: server.crt, key_file: server.key }\n")
 	dir := filepath.Dir(withTLS)
 	writePair(t, dir, "server", time.Now().Add(24*time.Hour))
@@ -279,7 +284,7 @@ func TestSecretsStayOutOfLogsAndErrors(t *testing.T) {
 	if !strings.Contains(seen.String(), "FINANCE_DSN") || !strings.Contains(seen.String(), "the login of sales_eu cannot connect, because the host name of the connection string does not resolve") {
 		t.Errorf("the capture misses the failures it should hold:\n%s", seen.String())
 	}
-	if !strings.Contains(seen.String(), "refusal: the private key in "+filepath.Join(dir, "other.key")+" does not belong to the certificate in "+filepath.Join(dir, "server.crt")) {
+	if !strings.Contains(seen.String(), "refusal: the private key in "+filepath.Join(dir, "other.key")+" does not match the certificate in "+filepath.Join(dir, "server.crt")) {
 		t.Errorf("the capture misses the refusal of the mismatched key:\n%s", seen.String())
 	}
 }
@@ -290,11 +295,11 @@ func TestCheckPrintsTheTLSFindingsFirst(t *testing.T) {
 		want                func(dir string, leaf *x509.Certificate) string
 	}{
 		{"plain HTTP beyond this machine", "0.0.0.0:8080", "allow_plain_http: true\n", func(string, *x509.Certificate) string {
-			return "report: listen 0.0.0.0:8080 serves plain HTTP beyond this machine, which allow_plain_http: true accepts. The bearer tokens of the callers cross the network in cleartext unless something in front of the server encrypts the traffic, such as a service mesh. Set tls with cert_file and key_file to serve HTTPS instead."
+			return "report: listen 0.0.0.0:8080 serves plain HTTP beyond this machine, which allow_plain_http: true accepts. Bearer tokens cross the network in cleartext unless a proxy or service mesh encrypts the traffic. Set tls.cert_file and tls.key_file to serve HTTPS."
 		}},
 		{"an expired certificate", "0.0.0.0:8443", "tls: { cert_file: server.crt, key_file: server.key }\n", func(dir string, leaf *x509.Certificate) string {
 			crt, key := filepath.Join(dir, "server.crt"), filepath.Join(dir, "server.key")
-			return "refusal: the certificate in " + crt + " expired at " + leaf.NotAfter.UTC().Format(time.RFC3339) + ", so adaptive-pg-mcp will not start. Renew it, and put the new certificate and its private key in " + crt + " and " + key + "."
+			return "refusal: the certificate in " + crt + " expired at " + leaf.NotAfter.UTC().Format(time.RFC3339) + ". Renew it, and put the new certificate and key in " + crt + " and " + key + "."
 		}},
 	}
 	for _, c := range cases {
@@ -303,7 +308,8 @@ func TestCheckPrintsTheTLSFindingsFirst(t *testing.T) {
 			leaf := writePair(t, filepath.Dir(path), "server", time.Now().Add(-time.Hour))
 			var out, errs bytes.Buffer
 			code := run(context.Background(), []string{"check", "-config", path}, &out, &errs, lookup(environ(knownToken)))
-			// No database of the test config can be reached, so the logins refuse the start after the TLS finding.
+			// No database of the test config can be reached, so the logins
+			// refuse the start after the TLS finding.
 			first, _, _ := strings.Cut(out.String(), "\n")
 			if want := c.want(filepath.Dir(path), leaf); code != 1 || first != want {
 				t.Errorf("check exited %d and printed first:\n%s\nwant 1 and:\n%s", code, first, want)
@@ -315,7 +321,7 @@ func TestCheckPrintsTheTLSFindingsFirst(t *testing.T) {
 // serveHTTP runs serve on HTTP with the config at path, sends it requests
 // that carry the known token in ways it must refuse and one it must admit,
 // calls list_databases and the data tools with the known token, and stops
-// it. It hands every answer and log line to keep.
+// it. It hands every response and log line to keep.
 func serveHTTP(t *testing.T, path string, env map[string]string, keep func(string)) {
 	t.Helper()
 	logs := newSyncBuffer()
@@ -373,7 +379,8 @@ func (bearer) RoundTrip(r *http.Request) (*http.Response, error) {
 	return http.DefaultTransport.RoundTrip(r)
 }
 
-// listDatabases calls list_databases at url with the known token and returns its text.
+// listDatabases calls list_databases at url with the known token and returns
+// its text.
 func listDatabases(t *testing.T, url string) string {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -398,7 +405,7 @@ func listDatabases(t *testing.T, url string) string {
 
 // dataTools calls the data tools at url with the known token, in calls that
 // pass, that access.yaml refuses, and that Postgres refuses with the known
-// password in a value, which its answer would repeat. It returns every text.
+// password in a value, which its error would repeat. It returns every text.
 func dataTools(t *testing.T, url string) string {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -431,7 +438,8 @@ func dataTools(t *testing.T, url string) string {
 	return texts.String()
 }
 
-// waitForAddress waits for serve to log its address and returns the endpoint URL.
+// waitForAddress waits for serve to log its address and returns the endpoint
+// URL.
 func waitForAddress(t *testing.T, logs *syncBuffer) string {
 	t.Helper()
 	re := regexp.MustCompile(`address=(https?://127\.0\.0\.1:\d+/mcp)`)

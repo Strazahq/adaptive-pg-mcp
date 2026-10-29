@@ -83,7 +83,7 @@ const (
 	// allowCross accepts dblink and postgres_fdw on the database before it.
 	allowCross = "    allow_cross_database: true\n"
 	// lock is the end of every line about a login that can write where it reads.
-	lock = "so its read tools rely on read-only transactions alone."
+	lock = "so the read tools rely on read-only transactions alone."
 )
 
 // refuses is a finding that refuses the start.
@@ -118,28 +118,28 @@ func TestStartChecks(t *testing.T) {
 			name: "a superuser with free SQL read refuses the start", freeSQL: "read", databases: single,
 			dsns: func(e env) map[string]string { return map[string]string{"SALES_EU_DSN": e.l.super.DSN(t, e.d)} },
 			want: func(env) []Finding {
-				return []Finding{refuses("the login of sales_eu is a superuser and free SQL is on, so adaptive-pg-mcp will not start. Use a login without superuser, turn free_sql off, or set allow_superuser: true for sales_eu.")}
+				return []Finding{refuses("the login of sales_eu is a superuser and free SQL is on. Use a login without superuser, turn free_sql off, or set allow_superuser: true for sales_eu.")}
 			},
 		},
 		{
 			name: "a superuser with free SQL read-write refuses the start", freeSQL: "read-write", databases: single,
 			dsns: func(e env) map[string]string { return map[string]string{"SALES_EU_DSN": e.l.super.DSN(t, e.d)} },
 			want: func(env) []Finding {
-				return []Finding{refuses("the login of sales_eu is a superuser and free SQL is on, so adaptive-pg-mcp will not start. Use a login without superuser, turn free_sql off, or set allow_superuser: true for sales_eu.")}
+				return []Finding{refuses("the login of sales_eu is a superuser and free SQL is on. Use a login without superuser, turn free_sql off, or set allow_superuser: true for sales_eu.")}
 			},
 		},
 		{
 			name: "allow_superuser accepts a superuser and reports it", freeSQL: "read", databases: single + "    allow_superuser: true\n",
 			dsns: func(e env) map[string]string { return map[string]string{"SALES_EU_DSN": e.l.super.DSN(t, e.d)} },
 			want: func(env) []Finding {
-				return []Finding{reports("the login of sales_eu is a superuser and free SQL is on, which allow_superuser: true accepts for sales_eu. A superuser's free SQL is not limited to the database, so a login without superuser is the safer setup.")}
+				return []Finding{reports("the login of sales_eu is a superuser and free SQL is on, which allow_superuser: true accepts for sales_eu. Its free SQL is not confined to sales_eu.")}
 			},
 		},
 		{
 			name: "a superuser with free SQL off is reported", freeSQL: "off", databases: single,
 			dsns: func(e env) map[string]string { return map[string]string{"SALES_EU_DSN": e.l.super.DSN(t, e.d)} },
 			want: func(env) []Finding {
-				return []Finding{reports("the login of sales_eu is a superuser, so no grant of the database limits its calls. A login without superuser adds the database's own lock.")}
+				return []Finding{reports("the login of sales_eu is a superuser, so no grant restricts its calls. A login without superuser is held to the database's grants.")}
 			},
 		},
 		{
@@ -148,14 +148,14 @@ func TestStartChecks(t *testing.T) {
 				return map[string]string{"HELPDESK_READ_DSN": e.l.plain.DSN(t, e.d), "HELPDESK_WRITE_DSN": e.l.super.DSN(t, e.d)}
 			},
 			want: func(env) []Finding {
-				return []Finding{refuses("the write login of helpdesk is a superuser and free SQL is on, so adaptive-pg-mcp will not start. Use a login without superuser, turn free_sql off, or set allow_superuser: true for helpdesk.")}
+				return []Finding{refuses("the write login of helpdesk is a superuser and free SQL is on. Use a login without superuser, turn free_sql off, or set allow_superuser: true for helpdesk.")}
 			},
 		},
 		{
 			name: "a member of a superuser role refuses the start", freeSQL: "read", databases: single,
 			dsns: func(e env) map[string]string { return map[string]string{"SALES_EU_DSN": e.l.member.DSN(t, e.d)} },
 			want: func(e env) []Finding {
-				return []Finding{refuses("the login of sales_eu can switch to the superuser role " + e.l.super.Name + " and free SQL is on, so adaptive-pg-mcp will not start. Use a login that is not a member of a superuser role, turn free_sql off, or set allow_superuser: true for sales_eu.")}
+				return []Finding{refuses("the login of sales_eu can switch to the superuser role " + e.l.super.Name + " and free SQL is on. Use a login that is not a member of a superuser role, turn free_sql off, or set allow_superuser: true for sales_eu.")}
 			},
 		},
 		{
@@ -167,14 +167,14 @@ func TestStartChecks(t *testing.T) {
 			name: "dblink refuses the start", freeSQL: "off", databases: single, sql: []string{"CREATE EXTENSION dblink"},
 			dsns: func(e env) map[string]string { return map[string]string{"SALES_EU_DSN": e.l.plain.DSN(t, e.d)} },
 			want: func(env) []Finding {
-				return []Finding{refuses("sales_eu has dblink installed, which lets a call reach another database, so adaptive-pg-mcp will not start. Drop the extension from sales_eu, or set allow_cross_database: true for sales_eu.")}
+				return []Finding{refuses("sales_eu has dblink installed, which lets a call reach another database. Drop the extension from sales_eu, or set allow_cross_database: true for sales_eu.")}
 			},
 		},
 		{
 			name: "postgres_fdw refuses the start", freeSQL: "off", databases: single, sql: []string{"CREATE EXTENSION postgres_fdw"},
 			dsns: func(e env) map[string]string { return map[string]string{"SALES_EU_DSN": e.l.plain.DSN(t, e.d)} },
 			want: func(env) []Finding {
-				return []Finding{refuses("sales_eu has postgres_fdw installed, which lets a call reach another database, so adaptive-pg-mcp will not start. Drop the extension from sales_eu, or set allow_cross_database: true for sales_eu.")}
+				return []Finding{refuses("sales_eu has postgres_fdw installed, which lets a call reach another database. Drop the extension from sales_eu, or set allow_cross_database: true for sales_eu.")}
 			},
 		},
 		{
@@ -184,7 +184,7 @@ func TestStartChecks(t *testing.T) {
 				return map[string]string{"HELPDESK_READ_DSN": e.l.plain.DSN(t, e.d), "HELPDESK_WRITE_DSN": e.l.other.DSN(t, e.d)}
 			},
 			want: func(env) []Finding {
-				return []Finding{refuses("helpdesk has dblink and postgres_fdw installed, which let a call reach another database, so adaptive-pg-mcp will not start. Drop the extensions from helpdesk, or set allow_cross_database: true for helpdesk.")}
+				return []Finding{refuses("helpdesk has dblink and postgres_fdw installed, which let a call reach another database. Drop the extensions from helpdesk, or set allow_cross_database: true for helpdesk.")}
 			},
 		},
 		{
@@ -200,7 +200,7 @@ func TestStartChecks(t *testing.T) {
 			sql:  []string{"CREATE TABLE a (x int)", "CREATE TABLE b (x int)", "CREATE TABLE c (x int)", "GRANT SELECT, INSERT ON a, b, c TO {plain}"},
 			dsns: func(e env) map[string]string { return map[string]string{"SALES_EU_DSN": e.l.plain.DSN(t, e.d)} },
 			want: func(env) []Finding {
-				return []Finding{reports("the login of sales_eu can write to all 3 tables, " + lock + " A separate read login with SELECT only adds the database's own lock.")}
+				return []Finding{reports("the login of sales_eu can write to all 3 tables, " + lock + " A separate read login with only SELECT adds Postgres grants as a second check.")}
 			},
 		},
 		{
@@ -208,7 +208,7 @@ func TestStartChecks(t *testing.T) {
 			sql:  []string{"CREATE SCHEMA app AUTHORIZATION {plain}", "CREATE TABLE app.a (x int)", "ALTER TABLE app.a OWNER TO {plain}"},
 			dsns: func(e env) map[string]string { return map[string]string{"SALES_EU_DSN": e.l.plain.DSN(t, e.d)} },
 			want: func(env) []Finding {
-				return []Finding{reports("the login of sales_eu can write to its only table, " + lock + " A separate read login with SELECT only adds the database's own lock.")}
+				return []Finding{reports("the login of sales_eu can write to its only table, " + lock + " A separate read login with only SELECT adds Postgres grants as a second check.")}
 			},
 		},
 		{
@@ -218,7 +218,7 @@ func TestStartChecks(t *testing.T) {
 				return map[string]string{"HELPDESK_READ_DSN": e.l.plain.DSN(t, e.d), "HELPDESK_WRITE_DSN": e.l.other.DSN(t, e.d)}
 			},
 			want: func(env) []Finding {
-				return []Finding{reports("the read login of helpdesk can write to 1 of its 3 tables, so on those its read tools rely on read-only transactions alone. Granting it SELECT only adds the database's own lock.")}
+				return []Finding{reports("the read login of helpdesk can write to 1 of its 3 tables, so on those tables the read tools rely on read-only transactions alone. Granting it only SELECT adds Postgres grants as a second check.")}
 			},
 		},
 		{
@@ -231,14 +231,14 @@ func TestStartChecks(t *testing.T) {
 			name: "BYPASSRLS is reported", freeSQL: "off", databases: single,
 			dsns: func(e env) map[string]string { return map[string]string{"SALES_EU_DSN": e.l.bypass.DSN(t, e.d)} },
 			want: func(env) []Finding {
-				return []Finding{reports("the login of sales_eu has BYPASSRLS, so no row-level security policy limits what its calls read or change. A login without BYPASSRLS keeps the policies in force.")}
+				return []Finding{reports("the login of sales_eu has BYPASSRLS, so row-level security policies do not apply to its calls. A login without BYPASSRLS keeps them in force.")}
 			},
 		},
 		{
 			name: "CREATEROLE with free SQL on is reported", freeSQL: "read", databases: single,
 			dsns: func(e env) map[string]string { return map[string]string{"SALES_EU_DSN": e.l.createrole.DSN(t, e.d)} },
 			want: func(env) []Finding {
-				return []Finding{reports("the login of sales_eu has CREATEROLE and free SQL is on, so a call can create and change roles of the whole database server, not only of sales_eu. A login without CREATEROLE removes that reach.")}
+				return []Finding{reports("the login of sales_eu has CREATEROLE and free SQL is on, so a call can create and change roles server-wide. Use a login without CREATEROLE.")}
 			},
 		},
 		{
@@ -250,7 +250,7 @@ func TestStartChecks(t *testing.T) {
 			name: "membership in server program and file roles with free SQL on is reported", freeSQL: "read", databases: single,
 			dsns: func(e env) map[string]string { return map[string]string{"SALES_EU_DSN": e.l.program.DSN(t, e.d)} },
 			want: func(env) []Finding {
-				return []Finding{reports("the login of sales_eu is a member of pg_execute_server_program and pg_write_server_files, and free SQL is on, so a call can reach the programs or files of the database server, not only sales_eu. A login without that membership removes that reach.")}
+				return []Finding{reports("the login of sales_eu is a member of pg_execute_server_program and pg_write_server_files, and free SQL is on, so a call can reach files or programs on the database host. Use a login without that membership.")}
 			},
 		},
 		{
@@ -259,7 +259,7 @@ func TestStartChecks(t *testing.T) {
 				return map[string]string{"SALES_EU_DSN": strings.Replace(e.l.plain.DSN(t, e.d), loginPassword, loginPassword+"x", 1)}
 			},
 			want: func(e env) []Finding {
-				return []Finding{refuses(`the login of sales_eu cannot connect, because the server answered: password authentication failed for user "` + e.l.plain.Name + `" (SQLSTATE 28P01), so adaptive-pg-mcp will not start. Check the connection string in SALES_EU_DSN, and that the database server is up and accepts the login.`)}
+				return []Finding{refuses(`the login of sales_eu cannot connect, because Postgres said: password authentication failed for user "` + e.l.plain.Name + `" (SQLSTATE 28P01). Check the connection string in SALES_EU_DSN, and that Postgres is up and accepts the login.`)}
 			},
 		},
 		{
@@ -268,7 +268,7 @@ func TestStartChecks(t *testing.T) {
 				return map[string]string{"SALES_EU_DSN": strings.Replace(e.l.plain.DSN(t, e.d), e.d.Name, e.d.Name+"_gone", 1)}
 			},
 			want: func(e env) []Finding {
-				return []Finding{refuses(`the login of sales_eu cannot connect, because the server answered: database "` + e.d.Name + `_gone" does not exist (SQLSTATE 3D000), so adaptive-pg-mcp will not start. Check the connection string in SALES_EU_DSN, and that the database server is up and accepts the login.`)}
+				return []Finding{refuses(`the login of sales_eu cannot connect, because Postgres said: database "` + e.d.Name + `_gone" does not exist (SQLSTATE 3D000). Check the connection string in SALES_EU_DSN, and that Postgres is up and accepts the login.`)}
 			},
 		},
 		{
@@ -277,7 +277,7 @@ func TestStartChecks(t *testing.T) {
 				return map[string]string{"SALES_EU_DSN": "postgres://nobody:" + loginPassword + "@127.0.0.1:1/sales_eu?sslmode=disable&connect_timeout=5"}
 			},
 			want: func(env) []Finding {
-				return []Finding{refuses("the login of sales_eu cannot connect, because nothing accepts connections at the host and port of the connection string, so adaptive-pg-mcp will not start. Check the connection string in SALES_EU_DSN, and that the database server is up and accepts the login.")}
+				return []Finding{refuses("the login of sales_eu cannot connect, because nothing accepts connections at the host and port of the connection string. Check the connection string in SALES_EU_DSN, and that Postgres is up and accepts the login.")}
 			},
 		},
 		{
@@ -286,7 +286,7 @@ func TestStartChecks(t *testing.T) {
 				return map[string]string{"HELPDESK_READ_DSN": e.l.plain.DSN(t, e.d), "HELPDESK_WRITE_DSN": "postgres://nobody:" + loginPassword + "@127.0.0.1:99999/helpdesk"}
 			},
 			want: func(env) []Finding {
-				return []Finding{refuses("the connection string in HELPDESK_WRITE_DSN for the write login of helpdesk cannot be used, because it does not parse as a postgres:// URL or as keyword=value pairs, so adaptive-pg-mcp will not start. Correct it in the environment the server starts with. It is not repeated here, because it may hold a password.")}
+				return []Finding{refuses("the connection string in HELPDESK_WRITE_DSN for the write login of helpdesk cannot be used, because it does not parse as a postgres:// URL or as keyword=value pairs. Correct it in the server's environment.")}
 			},
 		},
 		{
@@ -319,7 +319,7 @@ func TestStartChecks(t *testing.T) {
 			},
 			want: func(env) []Finding {
 				return []Finding{
-					refuses("the write login of helpdesk reaches a database that has dblink installed, which lets a call reach another database, so adaptive-pg-mcp will not start. Drop the extension from that database, or set allow_cross_database: true for helpdesk."),
+					refuses("the write login of helpdesk reaches a database that has dblink installed, which lets a call reach another database. Drop the extension from that database, or set allow_cross_database: true for helpdesk."),
 					refuses(elsewhere("the write login of helpdesk", "HELPDESK_WRITE_DSN")),
 				}
 			},
@@ -345,7 +345,7 @@ func TestStartChecks(t *testing.T) {
 			},
 			want: func(env) []Finding {
 				return []Finding{
-					refuses("the finance_reader login of helpdesk reaches a database that has postgres_fdw installed, which lets a call reach another database, so adaptive-pg-mcp will not start. Drop the extension from that database, or set allow_cross_database: true for helpdesk."),
+					refuses("the finance_reader login of helpdesk reaches a database that has postgres_fdw installed, which lets a call reach another database. Drop the extension from that database, or set allow_cross_database: true for helpdesk."),
 					refuses(elsewhere("the finance_reader login of helpdesk", "HELPDESK_FINANCE_DSN")),
 				}
 			},
@@ -373,7 +373,7 @@ func TestStartChecks(t *testing.T) {
 			want: func(env) []Finding {
 				return []Finding{
 					refuses(readIDRefused("helpdesk")),
-					refuses("the write login of helpdesk reaches a database that has dblink installed, which lets a call reach another database, so adaptive-pg-mcp will not start. Drop the extension from that database, or set allow_cross_database: true for helpdesk."),
+					refuses("the write login of helpdesk reaches a database that has dblink installed, which lets a call reach another database. Drop the extension from that database, or set allow_cross_database: true for helpdesk."),
 				}
 			},
 		},
@@ -387,7 +387,7 @@ func TestStartChecks(t *testing.T) {
 				return []Finding{
 					refuses(readIDRefused("helpdesk")),
 					refuses(loginIDRefused("the write login of helpdesk", "helpdesk")),
-					refuses("helpdesk has dblink installed, which lets a call reach another database, so adaptive-pg-mcp will not start. Drop the extension from helpdesk, or set allow_cross_database: true for helpdesk."),
+					refuses("helpdesk has dblink installed, which lets a call reach another database. Drop the extension from helpdesk, or set allow_cross_database: true for helpdesk."),
 				}
 			},
 		},
@@ -475,22 +475,22 @@ func TestStartChecks(t *testing.T) {
 
 // idUnreadable is the report about a login of database db that cannot read the system identifier.
 func idUnreadable(login, db string) string {
-	return login + " cannot read the id of " + db + ", because the server answered: permission denied for function pg_control_system (SQLSTATE 42501), so list_databases fails and every call that carries an ai.straza/object-id is refused on this login. Grant EXECUTE on the function pg_control_system() to the login, or restore the default grant to PUBLIC."
+	return login + " cannot read the id of " + db + ", because Postgres said: permission denied for function pg_control_system (SQLSTATE 42501). list_databases fails, and so does every call that carries ai.straza/object-id. Grant EXECUTE on pg_control_system() to the login, or restore its default grant to PUBLIC."
 }
 
 // elsewhere is the refusal of a login of helpdesk, whose connection string is in env, that reaches another database than its read login.
 func elsewhere(login, env string) string {
-	return login + " reaches another database than the read login of helpdesk, and its calls would change a database that list_databases does not name, so adaptive-pg-mcp will not start. Point the connection strings in " + env + " and HELPDESK_READ_DSN at the same database."
+	return login + " reaches a different database than the read login of helpdesk. Point " + env + " and HELPDESK_READ_DSN at the same database."
 }
 
 // readIDRefused is the refusal of a database with more than one login whose read login cannot read the system identifier.
 func readIDRefused(db string) string {
-	return "the read login of " + db + " cannot read the id of " + db + ", because the server answered: permission denied for function pg_control_system (SQLSTATE 42501), and without it adaptive-pg-mcp cannot check that the other logins of " + db + " reach the same database, so adaptive-pg-mcp will not start. Grant EXECUTE on the function pg_control_system() to the login, or restore the default grant to PUBLIC."
+	return "the read login of " + db + " cannot read the id of " + db + ", because Postgres said: permission denied for function pg_control_system (SQLSTATE 42501). Without it, adaptive-pg-mcp cannot check that every login of " + db + " reaches the same database. Grant EXECUTE on pg_control_system() to the login, or restore its default grant to PUBLIC."
 }
 
 // loginIDRefused is the refusal of a login other than the read login of a database that cannot read the system identifier.
 func loginIDRefused(login, db string) string {
-	return login + " cannot read the id of " + db + ", because the server answered: permission denied for function pg_control_system (SQLSTATE 42501), and without it adaptive-pg-mcp cannot check that the login reaches the same database as the read login of " + db + ", so adaptive-pg-mcp will not start. Grant EXECUTE on the function pg_control_system() to the login, or restore the default grant to PUBLIC."
+	return login + " cannot read the id of " + db + ", because Postgres said: permission denied for function pg_control_system (SQLSTATE 42501). Without it, adaptive-pg-mcp cannot check that this login reaches the same database as the read login. Grant EXECUTE on pg_control_system() to the login, or restore its default grant to PUBLIC."
 }
 
 // sameFindings reports whether two lists of findings are equal, sentence for sentence.

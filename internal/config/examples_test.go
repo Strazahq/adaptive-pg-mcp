@@ -5,7 +5,8 @@ import (
 	"testing"
 )
 
-// TestExamplesLoad loads the example server.yaml and access.yaml, so a format change cannot leave them behind.
+// TestExamplesLoad loads the example server.yaml and access.yaml, so a format
+// change cannot leave them behind.
 func TestExamplesLoad(t *testing.T) {
 	getenv := func(string) string { return "postgres://reader@db.example.internal:5432/sales_eu" }
 	cfg, err := Load(filepath.Join("..", "..", "examples", "server.yaml"), getenv)

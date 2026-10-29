@@ -1,4 +1,5 @@
-// Command adaptive-pg-mcp serves PostgreSQL databases over MCP, and makes the tokens its callers use.
+// Command adaptive-pg-mcp serves PostgreSQL databases over MCP and makes
+// caller tokens.
 package main
 
 import (
@@ -19,17 +20,16 @@ import (
 	"github.com/strazahq/adaptive-pg-mcp/internal/core"
 )
 
-// usage is the help text for the commands.
+// usage is the help text.
 const usage = `adaptive-pg-mcp serves PostgreSQL databases over MCP.
 
 Commands:
   adaptive-pg-mcp serve [-config ./server.yaml]
-      Serve the databases of server.yaml over stdio or Streamable HTTP, as its listen key says.
-      On stdio, the caller's token comes from the environment variable ADAPTIVE_PG_MCP_TOKEN.
-      It runs the start checks first, and does not start when one of them refuses.
+      Run the start checks, then serve on stdio or Streamable HTTP, as listen says.
+      On stdio, the caller's token comes from ADAPTIVE_PG_MCP_TOKEN.
   adaptive-pg-mcp check [-config ./server.yaml]
-      Run the start checks on every login and catalog statement of server.yaml without serving, and print what they find.
-      It exits 1 when serve would refuse to start, so a CI job can run it.
+      Run the start checks without serving, and print the findings.
+      Exits 1 when serve would refuse to start.
   adaptive-pg-mcp token
       Print a new token and its SHA-256 for access.yaml or gateway_tokens_sha256.
 `
@@ -42,7 +42,8 @@ func main() {
 }
 
 // run runs one command and returns its exit code: 0 on success, 1 when the
-// command fails, and 2 when it is called wrongly. Only token and check write to stdout.
+// command fails, and 2 on a usage error. Only token and check write to
+// stdout.
 func run(ctx context.Context, args []string, stdout, stderr io.Writer, getenv func(string) string) int {
 	if len(args) == 0 {
 		fmt.Fprint(stderr, usage)
@@ -59,11 +60,12 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, getenv fu
 		fmt.Fprint(stdout, usage)
 		return 0
 	}
-	fmt.Fprintf(stderr, "adaptive-pg-mcp has no command %q. Run adaptive-pg-mcp serve, adaptive-pg-mcp check or adaptive-pg-mcp token.\n", args[0])
+	fmt.Fprintf(stderr, "adaptive-pg-mcp has no command %q. Use serve, check or token.\n", args[0])
 	return 2
 }
 
-// serve loads the config, runs the start checks, and serves it on stdio or on the address in listen until ctx ends.
+// serve loads the config, runs the start checks, and serves on stdio or on
+// the address in listen until ctx ends.
 func serve(ctx context.Context, args []string, stderr io.Writer, getenv func(string) string) int {
 	flags := flag.NewFlagSet("serve", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -72,7 +74,7 @@ func serve(ctx context.Context, args []string, stderr io.Writer, getenv func(str
 		return 2
 	}
 	if flags.NArg() > 0 {
-		fmt.Fprintf(stderr, "serve takes only -config, and it got %q as well. Remove the extra arguments.\n", flags.Args())
+		fmt.Fprintf(stderr, "serve takes only -config, but got %q too. Remove the extra arguments.\n", flags.Args())
 		return 2
 	}
 	log := slog.New(slog.NewTextHandler(stderr, nil))
@@ -87,7 +89,7 @@ func serve(ctx context.Context, args []string, stderr io.Writer, getenv func(str
 	} else {
 		var ln net.Listener
 		if ln, err = net.Listen("tcp", cfg.Listen); err != nil {
-			log.Error(fmt.Sprintf("adaptive-pg-mcp cannot listen on %s, which %s names in listen: %v. Free the address, or set listen to another one.", cfg.Listen, *path, err))
+			log.Error(fmt.Sprintf("adaptive-pg-mcp cannot listen on %s, set in %s: %v. Free the address, or change listen.", cfg.Listen, *path, err))
 			return 1
 		}
 		err = srv.Serve(ctx, ln)
@@ -110,7 +112,7 @@ func check(ctx context.Context, args []string, stdout, stderr io.Writer, getenv 
 		return 2
 	}
 	if flags.NArg() > 0 {
-		fmt.Fprintf(stderr, "check takes only -config, and it got %q as well. Remove the extra arguments.\n", flags.Args())
+		fmt.Fprintf(stderr, "check takes only -config, but got %q too. Remove the extra arguments.\n", flags.Args())
 		return 2
 	}
 	cfg, err := config.Load(*path, getenv)
@@ -132,20 +134,21 @@ func check(ctx context.Context, args []string, stdout, stderr io.Writer, getenv 
 	}
 	switch refused {
 	case 0:
-		fmt.Fprintln(stdout, "check: no start check refuses, so adaptive-pg-mcp would start.")
+		fmt.Fprintln(stdout, "check: no refusals, so adaptive-pg-mcp would start.")
 		return 0
 	case 1:
-		fmt.Fprintln(stdout, "check: 1 of the findings above refuses the start, so adaptive-pg-mcp would not start. Fix what it says, and run adaptive-pg-mcp check again.")
+		fmt.Fprintln(stdout, "check: 1 refusal above, so adaptive-pg-mcp would not start. Fix it, and run adaptive-pg-mcp check again.")
 	default:
-		fmt.Fprintln(stdout, "check: "+strconv.Itoa(refused)+" of the findings above refuse the start, so adaptive-pg-mcp would not start. Fix what each refusal says, and run adaptive-pg-mcp check again.")
+		fmt.Fprintln(stdout, "check: "+strconv.Itoa(refused)+" refusals above, so adaptive-pg-mcp would not start. Fix them, and run adaptive-pg-mcp check again.")
 	}
 	return 1
 }
 
-// token prints a new token and its SHA-256 on stdout, and how to use them on stderr.
+// token prints a new token and its SHA-256 on stdout, and how to use them on
+// stderr.
 func token(args []string, stdout, stderr io.Writer) int {
 	if len(args) > 0 {
-		fmt.Fprintf(stderr, "token takes no arguments, and it got %q. Run adaptive-pg-mcp token alone.\n", args)
+		fmt.Fprintf(stderr, "token takes no arguments, but got %q. Run adaptive-pg-mcp token alone.\n", args)
 		return 2
 	}
 	tok, hash, err := core.NewToken()
@@ -154,6 +157,6 @@ func token(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	fmt.Fprintf(stdout, "token: %s\ntoken_sha256: %s\n", tok, hash)
-	fmt.Fprintln(stderr, "Give the token to its caller, and put token_sha256 in access.yaml, or in gateway_tokens_sha256 for a token Straza holds. adaptive-pg-mcp keeps neither, so this is the only time the token is shown.")
+	fmt.Fprintln(stderr, "Give the token to its caller, and put token_sha256 in access.yaml, or in gateway_tokens_sha256 for a Straza token. The token is not stored and will not be shown again.")
 	return 0
 }

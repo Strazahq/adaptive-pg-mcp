@@ -86,20 +86,20 @@ func TestListDatabasesPassesTheToolLint(t *testing.T) {
 func TestListDatabasesRefusesBadArguments(t *testing.T) {
 	cs := overStdio(t, New(standaloneConfig(), slog.New(slog.DiscardHandler)), tokenA, "")
 	cursorOf := func(name string) string { return base64.RawURLEncoding.EncodeToString([]byte(name)) }
-	badCursor := "the cursor of list_databases does not decode to a page of this listing, so the call is refused. Pass the nextCursor of the previous page exactly as it came, or leave cursor out to start from the first page."
+	badCursor := "the cursor of list_databases is not from this listing. Pass the nextCursor of the previous page unchanged, or leave cursor out for the first page."
 	cases := []struct {
 		name string
 		args any
 		want string
 	}{
-		{"a database argument", map[string]any{"database": "helpdesk"}, `list_databases takes no argument but cursor, and the call passed "database", so it is refused. Leave "database" out.`},
-		{"a cursor that is a number", map[string]any{"cursor": 5}, "the cursor of list_databases is not a string, so the call is refused. Pass the nextCursor of the previous page as it came, or leave cursor out for the first page."},
-		{"a cursor that is null", map[string]any{"cursor": nil}, "the cursor of list_databases is not a string, so the call is refused. Pass the nextCursor of the previous page as it came, or leave cursor out for the first page."},
-		{"arguments that are a list", []any{"cursor"}, `the arguments of list_databases are not a JSON object, so the call is refused. Pass an object, such as {} for the first page or {"cursor": "..."} for the next.`},
+		{"a database argument", map[string]any{"database": "helpdesk"}, `list_databases takes only the argument cursor. Leave "database" out.`},
+		{"a cursor that is a number", map[string]any{"cursor": 5}, "the cursor of list_databases must be a string. Pass the nextCursor of the previous page unchanged, or leave cursor out for the first page."},
+		{"a cursor that is null", map[string]any{"cursor": nil}, "the cursor of list_databases must be a string. Pass the nextCursor of the previous page unchanged, or leave cursor out for the first page."},
+		{"arguments that are a list", []any{"cursor"}, `the arguments of list_databases are not a JSON object. Pass {} for the first page, or {"cursor": "..."} for the next.`},
 		{"a cursor that is not base64url", map[string]any{"cursor": "!!"}, badCursor},
 		{"an empty cursor", map[string]any{"cursor": ""}, badCursor},
 		{"a cursor of a database the caller may not use", map[string]any{"cursor": cursorOf("sales_eu")}, badCursor},
-		{"a cursor of a database this server has no pool for", map[string]any{"cursor": cursorOf("helpdesk")}, "list_databases cannot read the id of helpdesk on its read login, because no pool is open for the read login of helpdesk, so it answers no page. Run adaptive-pg-mcp check to see why, and fix the login."},
+		{"a cursor of a database this server has no pool for", map[string]any{"cursor": cursorOf("helpdesk")}, "list_databases cannot read the id of helpdesk on its read login, because no pool is open for the read login of helpdesk. Try again, or ask an administrator to run adaptive-pg-mcp check."},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

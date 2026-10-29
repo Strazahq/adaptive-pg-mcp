@@ -1,11 +1,11 @@
-// Package catalog describes the organization's SQL statements that the
-// catalog index makes tools.
+// Package catalog loads and checks the catalog: reviewed SQL statements that
+// tools.yaml files turn into tools.
 package catalog
 
 import "time"
 
-// Mode says whether an entry reads or writes. The zero Mode is neither, so an
-// entry without one is refused.
+// Mode says whether a catalog tool reads or writes. The zero Mode is
+// neither, so a tool without a mode is refused.
 type Mode int
 
 const (
@@ -15,35 +15,38 @@ const (
 	Write
 )
 
-// Entry is one catalog statement that the index makes a tool.
+// Entry is one catalog tool: a statement and its settings in tools.yaml.
 type Entry struct {
 	// Name is the tool name, from the statement's -- name: line.
 	Name string
-	// Description tells the agent what the tool does, what it returns and its limits.
+	// Description tells the agent what the tool does, what it returns and
+	// its caps.
 	Description string
 	// Mode says whether the statement reads or writes.
 	Mode Mode
 	// Databases are the config names of the databases the tool runs on.
 	Databases []string
-	// Login names the login the statement runs as, such as read, write or finance_reader.
+	// Login names the login the statement runs as, such as read, write or
+	// finance_reader.
 	Login string
-	// SQL is the statement as its .sql file holds it.
+	// SQL is the statement text from its .sql file.
 	SQL string
 	// Params are the statement's parameters in $1 order.
 	Params []Param
-	// Limits are the entry's own caps. Nil keeps the server limits.
+	// Limits are the tool's own caps. Nil keeps the caps of server.yaml.
 	Limits *Limits
 	// Source is the .sql file relative to the catalog folder, for messages.
 	Source string
 }
 
-// Param is one statement parameter, with the constraints its index sets.
+// Param is one statement parameter, with the constraints tools.yaml sets.
 type Param struct {
 	// Name is the argument name the agent passes the value under.
 	Name string
 	// Description tells the agent what to pass.
 	Description string
-	// Type is the Postgres type name the prepare reports, such as int4, with a domain read as its base type.
+	// Type is the Postgres type name that the prepare reports, such as int4.
+	// A domain reads as its base type.
 	Type string
 	// Enum lists the only values the parameter takes. Empty means any.
 	Enum []string
@@ -59,15 +62,16 @@ type Param struct {
 	Required bool
 }
 
-// Limits are an entry's own caps, in the shape of the server limits. A zero
-// field keeps the server's value.
+// Limits are a catalog tool's own caps. A zero field keeps the cap of
+// server.yaml.
 type Limits struct {
-	// Rows is the most rows a read answers.
+	// Rows is the most rows a read returns.
 	Rows int
-	// Bytes is the most bytes a read answers.
+	// Bytes is the most bytes a read returns.
 	Bytes int
 	// Timeout is the statement_timeout of each call.
 	Timeout time.Duration
-	// WriteRows is the most rows a write may change before it rolls back.
+	// WriteRows is the most rows a write may change. A write over it rolls
+	// back.
 	WriteRows int
 }

@@ -70,7 +70,8 @@ func TestQueryRefusesBeforeSending(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			// The Tx holds no transaction, so a Query that sent anything would panic.
+			// The Tx holds no transaction, so a Query that sent anything would
+			// panic.
 			_, err := (&Tx{}).Query(context.Background(), c.sql, c.args...)
 			if err == nil || err.Error() != c.want {
 				t.Errorf("Query: got %v, want %s", err, c.want)
@@ -110,12 +111,12 @@ func TestReason(t *testing.T) {
 		err  error
 		want string
 	}{
-		{"a server error", &pgconn.PgError{Message: `password authentication failed for user "sales"`, Code: "28P01"}, `the server answered: password authentication failed for user "sales" (SQLSTATE 28P01)`},
-		{"a server error that repeats the password", fmt.Errorf("wrapped: %w", &pgconn.PgError{Message: "bad value " + password, Code: "22023"}), "the server answered: bad value [hidden] (SQLSTATE 22023)"},
+		{"a server error", &pgconn.PgError{Message: `password authentication failed for user "sales"`, Code: "28P01"}, `Postgres said: password authentication failed for user "sales" (SQLSTATE 28P01)`},
+		{"a server error that repeats the password", fmt.Errorf("wrapped: %w", &pgconn.PgError{Message: "bad value " + password, Code: "22023"}), "Postgres said: bad value [hidden] (SQLSTATE 22023)"},
 		{"a host that does not resolve", &net.OpError{Op: "dial", Err: &net.DNSError{Err: "no such host", Name: "db.example.internal"}}, "the host name of the connection string does not resolve"},
 		{"a refused connection", &net.OpError{Op: "dial", Err: syscall.ECONNREFUSED}, "nothing accepts connections at the host and port of the connection string"},
-		{"a deadline", context.DeadlineExceeded, "the server did not answer in time"},
-		{"a cancel", fmt.Errorf("x: %w", context.Canceled), "the call was cancelled before the server answered"},
+		{"a deadline", context.DeadlineExceeded, "Postgres did not reply in time"},
+		{"a cancel", fmt.Errorf("x: %w", context.Canceled), "the call was cancelled before Postgres replied"},
 		{"an error of Run", &Error{Reason: "the statement is empty"}, "the statement is empty"},
 		{"anything else, at its innermost", fmt.Errorf("dial postgres://sales:%s@db.example.internal: %w", password, errors.New("tls: handshake failure")), "the connection reported: tls: handshake failure"},
 		{"anything else that repeats the password", errors.New("odd " + password), "the connection reported: odd [hidden]"},
