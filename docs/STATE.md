@@ -8,9 +8,10 @@ tools/stategate.sh enforces it. Close an item by deleting its line.
 
 ## Q queue
 
-- Q-005 open straza | Run the server behind a live Straza gateway, and exercise the database scope, approval holds and the id check through it. | docs/DESIGN.md section 8 | [doc 10-29]
 
 ## B suspected bugs
+
+- B-001 open straza | In straza mode the server takes every gateway token on every tool, so the listing token that Straza sends only to list_databases also opened list_schemas on sales_us in a direct call on eval, while Straza's object marks reference asks a server to accept its listing credential on the listing tool only. | internal/core/token.go | [live 10-29]
 
 
 ## C standing constraints
