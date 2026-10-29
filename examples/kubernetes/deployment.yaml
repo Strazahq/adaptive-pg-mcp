@@ -1,0 +1,105 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: adaptive-pg-mcp
+  labels:
+    app.kubernetes.io/name: adaptive-pg-mcp
+spec:
+  # Clients on MCP revisions before 2026-07-28 keep a protocol session in
+  # the memory of the replica that opened it. More than one replica needs
+  # session affinity in front.
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: adaptive-pg-mcp
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: adaptive-pg-mcp
+    spec:
+      automountServiceAccountToken: false
+      # Needed while the image on GHCR is private. kustomization.yaml shows
+      # how to create it.
+      imagePullSecrets:
+        - name: ghcr-pull
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: adaptive-pg-mcp
+          # Pin the release you run.
+          image: ghcr.io/strazahq/adaptive-pg-mcp:0.1.0
+          # The image runs serve -config /etc/adaptive-pg-mcp/server.yaml.
+          ports:
+            - name: https
+              containerPort: 8443
+          # One variable per dsn_env in server.yaml.
+          env:
+            - name: HELPDESK_READ_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: adaptive-pg-mcp-dsn
+                  key: HELPDESK_READ_DSN
+            - name: HELPDESK_WRITE_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: adaptive-pg-mcp-dsn
+                  key: HELPDESK_WRITE_DSN
+            - name: SALES_EU_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: adaptive-pg-mcp-dsn
+                  key: SALES_EU_DSN
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+          # Every HTTP request needs a bearer token, so the probes open a
+          # TCP connection only.
+          readinessProbe:
+            tcpSocket:
+              port: https
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: https
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          volumeMounts:
+            - name: config
+              mountPath: /etc/adaptive-pg-mcp
+              readOnly: true
+      volumes:
+        # One folder that holds server.yaml, access.yaml, the catalog and
+        # the TLS pair, at the relative paths that server.yaml names.
+        - name: config
+          projected:
+            defaultMode: 0440
+            sources:
+              - configMap:
+                  name: adaptive-pg-mcp-config
+              - configMap:
+                  name: adaptive-pg-mcp-catalog-sales
+                  items:
+                    - key: tools.yaml
+                      path: catalog/sales/tools.yaml
+                    - key: revenue.sql
+                      path: catalog/sales/revenue.sql
+              - secret:
+                  name: adaptive-pg-mcp-tls
+                  items:
+                    - key: tls.crt
+                      path: tls/tls.crt
+                    - key: tls.key
+                      path: tls/tls.key

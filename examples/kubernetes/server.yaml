@@ -1,0 +1,20 @@
+# server.yaml on Kubernetes. docs/DESIGN.md section 3 holds every key.
+# Relative paths resolve beside this file, in the folder that
+# deployment.yaml mounts at /etc/adaptive-pg-mcp.
+version: 1
+mode: standalone
+listen: 0.0.0.0:8443
+tls:
+  cert_file: ./tls/tls.crt
+  key_file: ./tls/tls.key
+free_sql: read
+limits: { rows: 1000, bytes: 1048576, timeout: 30s, write_rows: 100 }
+access: ./access.yaml
+catalog: ./catalog
+databases:
+  helpdesk:
+    logins:
+      read:  { dsn_env: HELPDESK_READ_DSN }
+      write: { dsn_env: HELPDESK_WRITE_DSN }
+  sales_eu:
+    login: { dsn_env: SALES_EU_DSN }

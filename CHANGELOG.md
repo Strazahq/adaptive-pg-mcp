@@ -1,30 +1,52 @@
 # Changelog
 
-## Unreleased
+All notable changes to this project are documented in this file.
 
-- Start adaptive-pg-mcp with its guardrails, design and plan. The design is the v1 contract the owner approved on 2026-10-28. The gates hold the server to the newest MCP revision and go-sdk release (tools/specgate.sh, revision 2026-07-28 and go-sdk v1.8.0 at the start), to its SQL and process boundaries (tools/gogate.sh), and to the secret and vulnerability scans at push.
-- Add the Go module, internal/catalog and internal/core, with the seam between them: core.Tool turns a catalog.Entry into an MCP tool that passes the tool lint, or names what to fix in the entry. The seam is fixed first so that the core (M1) and the catalog (M2) can be built in separate folders against one type. The package names and the seam are the ones the owner approved on 2026-10-28.
-- Add github.com/modelcontextprotocol/go-sdk v1.8.0, the official MCP SDK, which serves revision 2026-07-28. Its license is moving from MIT to Apache-2.0, and both are compatible with this project. govulncheck and osv-scanner find nothing in it.
-- Add github.com/google/jsonschema-go v0.4.3 as a direct dependency, because core builds input and output schemas with it, and the go-sdk already requires it. It is MIT licensed. govulncheck and osv-scanner find nothing in it.
-- Pin the toolchain to go1.27.3 in go.mod, because Go 1.26.5 on the build box has ten standard library vulnerabilities that govulncheck finds on the server's call paths. Go downloads the pinned toolchain on any older install, so every build gets the fixed library. govulncheck now has to be built with Go 1.27 or newer to read the sources.
-- Add the Postgres 14 to 18 test harness. `sh tools/pg.sh up` starts one pinned Alpine Postgres container per major version on 127.0.0.1, with its data on tmpfs, and internal/pgtest hands the servers to the tests built with `-tags pg`. `make pgtest` and the push gate run those tests and always remove the containers. The tag keeps the commit gate free of Docker, while no push lands until every database test passes on every supported major version.
-- Add github.com/jackc/pgx/v5 v5.11.0 as the Postgres driver of docs/PLAN.md decision 7, because the harness connects with it and the core will too. It is MIT licensed. It brings golang.org/x/text v0.29.0, in which govulncheck finds two vulnerabilities on the connect path, so x/text is raised to v0.41.0 (BSD-3-Clause), the first release that fixes both and still allows `go 1.25.0`. govulncheck and osv-scanner then find nothing.
-- Raise golang.org/x/sys, which the go-sdk brings, from v0.41.0 to v0.44.0, because osv-scanner refuses the push on GO-2026-5024 in v0.41.0. The code does not reach it, but the gate refuses any known vulnerability in the module graph.
-- Add the config, the tokens, the token check and serving over stdio and Streamable HTTP, which the pools, start checks and tools of M1 build on. server.yaml and access.yaml are version 1, examples/ holds both and a test loads them, and an unknown key, a missing key or an unusable value fails the load with a sentence that names it. The check hashes the token and compares it with every configured hash in constant time, on every HTTP request of every revision the SDK serves, and once at start on stdio from ADAPTIVE_PG_MCP_TOKEN. Revision 2026-07-28 has no protocol sessions, so its requests run on a stateless handler, and older revisions keep sessions that the SDK binds to the caller that opened them. An independent review found no way past the check, and its three low findings are fixed: a test pins the constant-time loop of the hash match, the missing-key hint no longer misstates which keys may be left out, and a listen of a port without a host is refused, because it would serve every network interface.
-- Add go.yaml.in/yaml/v3 v3.0.5, the maintained successor of the archived gopkg.in/yaml.v3, to read server.yaml and access.yaml with known fields enforced. It is MIT and Apache-2.0 licensed. govulncheck and osv-scanner find nothing in it.
-- Add internal/pg, which holds a pgx pool per login and sends every statement of the server as one unnamed prepared statement on the extended protocol, in a transaction of its own, with statement_timeout set through a bind parameter. pgx sends an Exec without arguments on the simple query protocol, which can carry several statements, so the package never calls Exec, and a test shows that two statements in one text are refused with and without arguments on Postgres 14 to 18.
-- Add the start checks and the check command, so that a login posture that breaks the promise of one database per call stops the server before it serves. serve refuses to start, and check exits 1, when a login is a superuser or a member of a superuser role while free SQL is on, when a database that any of its logins reaches has dblink or postgres_fdw installed, and when a login cannot connect or its connection string does not parse. Everything else is reported. An independent review found that the extension check read only the first login's database, and it now checks every login.
-- Add list_databases and the id check, so that Straza can list the databases and a call on a database dropped and created again under the same name is refused. The id is the cluster's system identifier and the database OID, read on the database's read login, and a plain login reads the identifier on Postgres 14 to 18.
-- Add github.com/jackc/puddle/v2 v2.2.2 as an indirect dependency, the resource pool that pgxpool is built on, because the server holds a pool per login. It is MIT licensed, by the author of pgx. govulncheck and osv-scanner find nothing in it.
-- Add the built-in data tools, free SQL, the limits and the standalone authorization, which complete M1. Every call checks the caller's tools, databases and tables, then its arguments, then the Straza id on the call's own transaction, and in standalone mode tools/list shows each caller only its own tools and databases. A write over write_rows rolls back, counted across every user table so that cascades and triggers count. A read stops at the row or byte cap without reading the rest. Free SQL closes its connection after each call, and a cancelled call stops its statement in Postgres on every revision over stdio and HTTP.
-- Split free SQL into execute_sql for row changes under the write cap and execute_ddl for TRUNCATE and changes of structure, as the owner ruled, so that a Straza policy can hold structure changes alone. The split reads the command tag and the rows changed in the system catalogs, never the SQL text, because an independent review showed a structure change inside a DO block passing a tag check alone.
-- Refuse the start when a login of a database reaches another database than its read login, or when their ids cannot be compared, require list_databases in a standalone caller's tools, and narrow list_schemas and list_tables to a caller's tables, as the owner ruled on P-008, P-009 and P-012. Reads stop at the cap with truncated rather than paging, as the owner ruled on P-013.
-- Add the catalog, which completes M2, so that an organization's reviewed SQL becomes named tools with typed arguments instead of free SQL. Each statement in a .sql file starts at a -- name: line, and a tools.yaml index per folder, version 1, makes it a tool, with examples/catalog loaded and prepared by the tests. serve and check prepare every indexed statement on each of its databases and on its entry's login with Parse and Describe only, fill each parameter's type from what Postgres reports, and refuse the start when a statement does not prepare, its parameter count differs from its index, or a parameter's type differs between two of its databases. A catalog tool runs through the call path of the built-in tools, on its entry's login and with its entry's limits, and closes its connection after each call. The loader reads only files inside the catalog folder. An independent review found no way for a catalog call to escape its limits.
-- Report at start each tool that a standalone caller's access.yaml entry lists and the server does not serve, because such a name gives the caller nothing and is often a typing mistake.
-- Refuse a server.yaml, access.yaml or tools.yaml that holds a second YAML document, because the decoder read only the first one and dropped the rest without a word.
-- Skip hidden files and folders in the catalog, read each real folder once, and follow a link to a folder, a .sql file or a tools.yaml only when it is relative and stays inside the catalog folder, as the owner ruled. A Kubernetes ConfigMap mount loads each statement once, and an unrelated link such as one to a shared LICENSE no longer blocks the start.
-- Report each cap that a catalog entry raises above server.yaml, as the owner ruled that an entry may raise or lower them, so that an operator sees which tools go past the cap of the built-in tools.
-- Let tools/textgate.sh pass a Go line that only calls the method that releases a sync.Mutex, whose name it took for a filler word, so that Go code that releases a mutex can be committed. Prose with the word is still refused.
-- Check the grants of every catalog statement at start, as the owner ruled, so that a statement whose login lacks a grant stops the start instead of failing its first call. The check plans each statement with EXPLAIN (ANALYZE false) and NULL for each parameter, on its entry's login in a read-only transaction that always rolls back, and then closes the connection, because the planner may evaluate a STABLE or IMMUTABLE function, and an advisory lock taken there outlived the transaction on Postgres 14 to 18. A statement that EXPLAIN cannot plan, such as CALL, and a plan that fails only because of the NULL values are reported, and their tools are served. A plan that Postgres cancels or cuts off refuses the start. A grant that Postgres checks only while a statement runs, such as USAGE on a sequence, still shows on the first call. The loader refuses a statement that starts with a semicolon, which would cut it off from the EXPLAIN. An independent review found that a cancelled plan was only reported, that a notification sent while planning was delivered, and that a leading semicolon skipped the check, and all three are fixed.
-- Add TLS to Streamable HTTP with tls.cert_file and tls.key_file in server.yaml, as the owner ruled, because a listen address beyond this machine sent bearer tokens in cleartext. HTTPS serves TLS 1.2 or later with Go's default cipher suites and HTTP/2. A certificate and key that do not load, or a certificate that has expired, refuse the start, and serve reads the files again at most once a minute, so that a renewed certificate is served without a restart. Plain HTTP beyond this machine refuses the load unless allow_plain_http: true, for a service mesh that encrypts in front, and serve refuses a listen whose name resolves to an address that is not loopback. The format stays version 1 because it is unreleased. Invariant 6 now names the certificate and key among the files the server reads. An independent review found that localhost was trusted by name, so serve now checks the address it binds.
-- Add the config name to the database id, as the owner ruled, because a standby or a restored copy of a database keeps the system identifier and OID of its source, so a config that listed a database and its copy under two names gave one id under two values, and Straza fails such a listing. A database dropped and created again still gets a new id, and a rename in server.yaml now gives the database a new id. An independent review found nothing of realistic impact, and a test now lists a database and its copy under two names. The owner also kept the names and shapes the M1 lanes chose, and the refusal of every request that carries an Origin header, since desktop clients, connectors and Straza send none.
+The format is based on
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
+adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+### Added
+
+- The `serve`, `check` and `token` commands. `check` runs the start checks
+  without serving, so a catalog repository can run it in CI.
+- Streamable HTTP at `/mcp` with a bearer token on every request, and stdio
+  with the token in `ADAPTIVE_PG_MCP_TOKEN`, checked once at start.
+- HTTPS with `tls`, which serves a renewed certificate without a restart.
+  Plain HTTP beyond loopback needs `allow_plain_http: true`, for a proxy or
+  service mesh that encrypts the traffic.
+- Standalone mode, where access.yaml names the tools, databases and tables
+  of each caller, and straza mode, where the Straza gateway decides per
+  agent.
+- The built-in tools `list_schemas`, `list_tables`, `describe_table`,
+  `read_rows`, `aggregate`, `insert_rows`, `update_rows` and `delete_rows`.
+- Free SQL as `query_sql`, `execute_sql` and `execute_ddl`, split by what
+  Postgres reports about the statement, never by its text, so a policy can
+  hold changes of structure for approval on their own.
+- Caps on the rows, bytes and time of each call and on the rows a write
+  changes. A write over its cap rolls back, with triggers and cascades
+  counted.
+- The catalog, which turns reviewed SQL in `.sql` files into named tools
+  with typed parameters through a tools.yaml per folder.
+- Start checks that refuse to serve on a superuser login while free SQL is
+  on, dblink or postgres_fdw, logins of one database that reach different
+  databases, a login that cannot connect, or a TLS pair that does not load.
+- A grants check of each catalog statement at start, through EXPLAIN on
+  its own login, so a missing grant stops the start instead of failing the
+  first call.
+- The database id check, which refuses a call on a database dropped and
+  created again under the same name until Straza lists it again.
+- `list_databases`, which lists the configured databases with an id that
+  joins the cluster's system identifier, the database OID and the config
+  name.
+- A container image at `ghcr.io/strazahq/adaptive-pg-mcp` for linux/amd64
+  and linux/arm64, on distroless static as a non-root user.
+- Docker Compose and Kubernetes examples. The Kubernetes one takes its TLS
+  pair from cert-manager.
+- The direct dependencies github.com/modelcontextprotocol/go-sdk v1.8.0
+  (MIT and Apache-2.0), github.com/google/jsonschema-go v0.4.3 (MIT),
+  github.com/jackc/pgx/v5 v5.11.0 (MIT) and go.yaml.in/yaml/v3 v3.0.5 (MIT
+  and Apache-2.0). govulncheck and osv-scanner find no known vulnerability
+  in them.

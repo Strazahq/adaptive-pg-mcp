@@ -1,0 +1,23 @@
+# access.yaml of the compose trial: one caller with every tool on helpdesk.
+# token_sha256 is the SHA-256 of the trial token demo-token. For anything
+# beyond a trial, adaptive-pg-mcp token prints a new token and its hash.
+version: 1
+callers:
+  - name: demo
+    token_sha256: "7c43ef5ae21d43ce2743f770c68e24def1a43ee2f416d2438410c8af7af2ff2c" # gitleaks:allow
+    tools:
+      - list_databases
+      - list_schemas
+      - list_tables
+      - describe_table
+      - read_rows
+      - aggregate
+      - insert_rows
+      - update_rows
+      - delete_rows
+      - query_sql
+      - execute_sql
+      - execute_ddl
+      - tickets_by_status
+      - close_stale_tickets
+    databases: [helpdesk]

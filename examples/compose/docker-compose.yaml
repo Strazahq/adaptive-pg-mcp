@@ -1,0 +1,42 @@
+# A local trial: Postgres 18 with a helpdesk database, and adaptive-pg-mcp
+# built from this repository in front of it. From this folder:
+#
+#   docker compose up --build
+#
+# The server listens on http://127.0.0.1:8080/mcp and accepts the bearer token
+# demo-token. docker compose down -v removes the containers and the data.
+# The passwords and the token are for this trial only.
+name: adaptive-pg-mcp-demo
+
+services:
+  postgres:
+    image: postgres:18.6-alpine3.24
+    environment:
+      POSTGRES_DB: helpdesk
+      POSTGRES_PASSWORD: demo
+    volumes:
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      # Probe over TCP. The temporary server that runs init.sql listens only on
+      # the Unix socket, so a socket probe passes too early.
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "postgres", "-d", "helpdesk"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  adaptive-pg-mcp:
+    build:
+      context: ../..
+    image: adaptive-pg-mcp:demo
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      HELPDESK_READ_DSN: postgres://helpdesk_read:demo@postgres:5432/helpdesk?sslmode=disable
+      HELPDESK_WRITE_DSN: postgres://helpdesk_write:demo@postgres:5432/helpdesk?sslmode=disable
+    volumes:
+      - ./server.yaml:/etc/adaptive-pg-mcp/server.yaml:ro
+      - ./access.yaml:/etc/adaptive-pg-mcp/access.yaml:ro
+      - ../catalog:/etc/adaptive-pg-mcp/catalog:ro
+    ports:
+      - "127.0.0.1:8080:8080"

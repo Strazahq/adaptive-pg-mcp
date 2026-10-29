@@ -1,0 +1,19 @@
+# server.yaml of the compose trial. docs/DESIGN.md section 3 holds every key.
+version: 1
+mode: standalone
+# The server listens on every address of its container, and compose
+# publishes the port on 127.0.0.1 of the host only. The trial has no tls, so
+# allow_plain_http accepts plain HTTP, which here never leaves this machine.
+# The start log reports it. Anything beyond a trial sets tls instead.
+listen: 0.0.0.0:8080
+allow_plain_http: true
+free_sql: read-write
+limits: { rows: 1000, bytes: 1048576, timeout: 30s, write_rows: 100 }
+access: ./access.yaml
+# examples/catalog, mounted read-only by docker-compose.yaml.
+catalog: ./catalog
+databases:
+  helpdesk:
+    logins:
+      read:  { dsn_env: HELPDESK_READ_DSN }
+      write: { dsn_env: HELPDESK_WRITE_DSN }

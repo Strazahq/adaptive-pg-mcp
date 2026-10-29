@@ -1,0 +1,14 @@
+# The index of the sales statements in this folder. docs/DESIGN.md section 3
+# holds every key.
+version: 1
+tools:
+  revenue_by_region:
+    description: Sums net revenue per region for one month. Returns one row per region.
+    mode: read
+    databases: [sales_eu]
+    login: read
+    params:
+      - name: month
+        description: The first day of the month, such as 2026-09-01.
+        required: true
+    limits: { rows: 100 }

@@ -1,0 +1,20 @@
+# The serving certificate. cert-manager writes it to the Secret
+# adaptive-pg-mcp-tls and renews it there. The server reads the files again
+# at most once a minute, so a renewed pair serves without a restart.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: adaptive-pg-mcp
+spec:
+  secretName: adaptive-pg-mcp-tls
+  dnsNames:
+    - adaptive-pg-mcp.adaptive-pg-mcp.svc
+    - adaptive-pg-mcp.adaptive-pg-mcp.svc.cluster.local
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  # Name the issuer of your cluster. Clients must trust this issuer's CA.
+  issuerRef:
+    kind: ClusterIssuer
+    name: internal-ca

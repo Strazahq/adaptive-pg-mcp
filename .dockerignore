@@ -1,0 +1,17 @@
+# The build needs the module files, the Go sources, LICENSE and NOTICE.
+# Everything else stays out of the build context.
+*
+!go.mod
+!go.sum
+!cmd/
+!internal/
+!LICENSE
+!NOTICE
+**/*_test.go
+
+# Never in the context, even if a line above is widened later.
+.git
+.tools
+**/*.local
+CLAUDE.local.md
+tools/internal-names.local
