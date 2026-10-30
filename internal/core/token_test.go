@@ -45,9 +45,10 @@ func standaloneConfig() *config.Config {
 	}
 }
 
-// strazaConfig is a straza config whose gateway holds gatewayToken.
+// strazaConfig is a straza config whose gateway holds gatewayToken for calls
+// and listingToken for the listing.
 func strazaConfig() *config.Config {
-	return &config.Config{Mode: config.Straza, Listen: "127.0.0.1:0", GatewayTokens: []config.Hash{hashOf(unknownToken + "x"), hashOf(gatewayToken)}}
+	return &config.Config{Mode: config.Straza, Listen: "127.0.0.1:0", GatewayTokens: []config.Hash{hashOf(unknownToken + "x"), hashOf(gatewayToken)}, ListingTokens: []config.Hash{hashOf(listingToken)}}
 }
 
 func TestCheckBearer(t *testing.T) {
@@ -66,6 +67,8 @@ func TestCheckBearer(t *testing.T) {
 		{"the scheme in mixed case", standalone, []string{"bEaReR " + tokenA}, "support_bot", admitted},
 		{"surrounding whitespace", standalone, []string{" \tBearer  " + tokenA + " \t"}, "support_bot", admitted},
 		{"a gateway token without the apm_ prefix", straza, []string{"Bearer " + gatewayToken}, gatewayCaller, admitted},
+		{"a listing token", straza, []string{"Bearer " + listingToken}, listingCaller, admitted},
+		{"a listing token in mode standalone", standalone, []string{"Bearer " + listingToken}, "", badBearer},
 		{"a wrong token", standalone, []string{"Bearer " + tokenA + "x"}, "", badBearer},
 		{"a token whose hash is not configured", standalone, []string{"Bearer " + unknownToken}, "", badBearer},
 		{"a caller token in mode straza", straza, []string{"Bearer " + tokenA}, "", badBearer},

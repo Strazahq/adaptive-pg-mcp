@@ -95,6 +95,16 @@ func TestLoadAppliesTheModeRules(t *testing.T) {
 			straza(s)
 			set(s, "gateway_tokens_sha256", []any{hashA, strings.ToUpper("ab" + hashA[2:])})
 		}, "$DIR/server.yaml has item 2 of gateway_tokens_sha256 that is not 64 lowercase hex characters. Copy each hash as adaptive-pg-mcp token prints it."},
+		{"listing tokens in standalone", func(s, a map[string]any, e map[string]string) { set(s, "listing_tokens_sha256", []any{hashB}) },
+			"$DIR/server.yaml sets listing_tokens_sha256 in standalone mode, where access.yaml names the callers. Remove it, or set mode: straza."},
+		{"listing token in capitals", func(s, a map[string]any, e map[string]string) {
+			straza(s)
+			set(s, "listing_tokens_sha256", []any{strings.ToUpper("ab" + hashB[2:])})
+		}, "$DIR/server.yaml has item 1 of listing_tokens_sha256 that is not 64 lowercase hex characters. Copy each hash as adaptive-pg-mcp token prints it."},
+		{"a listing token that is also a gateway token", func(s, a map[string]any, e map[string]string) {
+			straza(s)
+			set(s, "listing_tokens_sha256", []any{hashB, hashA})
+		}, "$DIR/server.yaml has item 2 of listing_tokens_sha256 in gateway_tokens_sha256 too, so that token would work on every tool. Give Straza a separate token for the listing, and keep its hash in listing_tokens_sha256 only."},
 	})
 }
 

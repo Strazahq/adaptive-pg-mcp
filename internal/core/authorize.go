@@ -101,6 +101,19 @@ func (s *Server) tablesOf(caller string) (schemas, tables []string) {
 	return schemas, tables
 }
 
+// listingOnly is receiving middleware that, in straza mode, refuses every
+// tools/call of a listing token except one of list_databases. It runs before
+// the tool's handler, so no tool can skip it.
+func (s *Server) listingOnly(next mcp.MethodHandler) mcp.MethodHandler {
+	return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
+		call, ok := req.(*mcp.CallToolRequest)
+		if caller, _ := callerFrom(ctx); ok && s.cfg.Mode == config.Straza && caller == listingCaller && call.Params.Name != listDatabasesName {
+			return toolError(errors.New(call.Params.Name + " refused the call, because it came with a listing token, which works on list_databases only. Send a token whose SHA-256 is in gateway_tokens_sha256 instead.")), nil
+		}
+		return next(ctx, method, req)
+	}
+}
+
 // freeTools are the free SQL tools, which a caller narrowed to tables may not
 // use.
 var freeTools = []string{querySQLName, executeSQLName, executeDDLName}
@@ -110,19 +123,32 @@ var freeTools = []string{querySQLName, executeSQLName, executeDDLName}
 // SQL tools for a caller narrowed to tables, and cuts the database enum of
 // each tool to the caller's databases. A tool left with no database is left
 // out. The caller is the one identify named for this request. The list
-// differs per caller, so its cache scope is private. In straza mode every
-// caller gets the same list, because Straza decides.
+// differs per caller, so its cache scope is private. In straza mode a
+// gateway token gets every tool, because Straza decides, and a listing token
+// gets list_databases only. Once listing tokens are set, the list differs per
+// caller in straza mode too, so its cache scope is private there as well.
 func (s *Server) filterTools(next mcp.MethodHandler) mcp.MethodHandler {
 	return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
 		res, err := next(ctx, method, req)
 		list, ok := res.(*mcp.ListToolsResult)
-		if err != nil || !ok || s.cfg.Mode != config.Standalone {
+		if err != nil || !ok {
 			return res, err
 		}
 		caller, _ := callerFrom(ctx)
 		filtered := *list
 		filtered.CacheScope = "private"
 		filtered.Tools = []*mcp.Tool{}
+		if s.cfg.Mode != config.Standalone {
+			if len(s.cfg.ListingTokens) == 0 {
+				return res, nil
+			}
+			for _, tool := range list.Tools {
+				if caller != listingCaller || tool.Name == listDatabasesName {
+					filtered.Tools = append(filtered.Tools, tool)
+				}
+			}
+			return &filtered, nil
+		}
 		entry := s.callerEntry(caller)
 		if entry == nil {
 			return &filtered, nil

@@ -377,7 +377,8 @@ databases:
 | `free_sql` | yes | `off`, `read` for `query_sql`, or `read-write` for `query_sql`, `execute_sql` and `execute_ddl`. |
 | `limits` | yes | `rows` and `bytes` cap what a read returns, `timeout` is the `statement_timeout` of each call, and `write_rows` caps the rows a write may change. |
 | `access` | standalone mode | The path of access.yaml. Refused in straza mode. |
-| `gateway_tokens_sha256` | straza mode | The SHA-256 of each token Straza holds. Refused in standalone mode. |
+| `gateway_tokens_sha256` | straza mode | The SHA-256 of each token Straza calls with. Refused in standalone mode. |
+| `listing_tokens_sha256` | no | The SHA-256 of each token Straza sends only to `list_databases`, which is all such a token can call. Refused in standalone mode. |
 | `catalog` | yes | The catalog folder, or `none`. |
 | `databases` | yes | Each database under the name that calls use, with its logins. |
 
@@ -589,11 +590,16 @@ In straza mode the server trusts the gateway for identity and policy:
 mode: straza
 gateway_tokens_sha256:
   - "<SHA-256 of the token Straza calls with>"
+listing_tokens_sha256:
   - "<SHA-256 of the token Straza lists with>"
 ```
 
-The server accepts only those tokens, and every request has the caller
-`straza`. Straza decides which tools and which databases each agent may
+The server accepts only those tokens. A gateway token reaches every tool,
+and every request with it has the caller `straza`. A listing token sees and
+calls `list_databases` only, so a leaked one cannot read or change data. A
+hash in both lists fails the load, and a listing token whose hash is in
+`gateway_tokens_sha256` alone would reach every tool, so keep it in
+`listing_tokens_sha256`. Straza decides which tools and which databases each agent may
 use, holds a call for approval when its policy says so, and writes the
 audit record. Each data tool carries the mark
 `ai.straza/object: {type: database, argument: database}`, and

@@ -67,6 +67,9 @@ type Config struct {
 	// GatewayTokens are the SHA-256 hashes of the Straza tokens, in straza
 	// mode only.
 	GatewayTokens []Hash
+	// ListingTokens are the SHA-256 hashes of the tokens Straza sends only
+	// to list_databases, in straza mode only.
+	ListingTokens []Hash
 	// Catalog is the catalog folder, resolved against the folder of
 	// server.yaml, or empty for none.
 	Catalog string
@@ -146,6 +149,7 @@ type rawServer struct {
 	FreeSQL             *string                 `yaml:"free_sql"`
 	Limits              *rawLimits              `yaml:"limits"`
 	GatewayTokensSHA256 []string                `yaml:"gateway_tokens_sha256"`
+	ListingTokensSHA256 []string                `yaml:"listing_tokens_sha256"`
 	Catalog             *string                 `yaml:"catalog"`
 	Access              *string                 `yaml:"access"`
 	Databases           map[string]*rawDatabase `yaml:"databases"`
@@ -318,12 +322,15 @@ func checkLimits(path string, raw *rawLimits) (Limits, error) {
 }
 
 // checkMode checks the keys of one mode: access in standalone mode,
-// gateway_tokens_sha256 in straza mode. It returns the resolved path of
-// access.yaml.
+// gateway_tokens_sha256 and listing_tokens_sha256 in straza mode. It returns
+// the resolved path of access.yaml.
 func checkMode(path string, raw *rawServer, cfg *Config) (string, error) {
 	if cfg.Mode == Standalone {
 		if raw.GatewayTokensSHA256 != nil {
 			return "", fmt.Errorf("%s sets gateway_tokens_sha256 in standalone mode, where access.yaml names the callers. Remove it, or set mode: straza.", path)
+		}
+		if raw.ListingTokensSHA256 != nil {
+			return "", fmt.Errorf("%s sets listing_tokens_sha256 in standalone mode, where access.yaml names the callers. Remove it, or set mode: straza.", path)
 		}
 		if unset(raw.Access) {
 			return "", fmt.Errorf("%s does not set access, which standalone mode needs. Add access: the path to access.yaml.", path)
@@ -336,14 +343,33 @@ func checkMode(path string, raw *rawServer, cfg *Config) (string, error) {
 	if len(raw.GatewayTokensSHA256) == 0 {
 		return "", fmt.Errorf("%s does not set gateway_tokens_sha256, which straza mode needs. Add the token_sha256 that adaptive-pg-mcp token prints for each Straza token.", path)
 	}
-	for i, h := range raw.GatewayTokensSHA256 {
-		hash, ok := parseHash(h)
-		if !ok {
-			return "", fmt.Errorf("%s has item %d of gateway_tokens_sha256 that is not 64 lowercase hex characters. Copy each hash as adaptive-pg-mcp token prints it.", path, i+1)
+	var err error
+	if cfg.GatewayTokens, err = parseHashes(path, "gateway_tokens_sha256", raw.GatewayTokensSHA256); err != nil {
+		return "", err
+	}
+	if cfg.ListingTokens, err = parseHashes(path, "listing_tokens_sha256", raw.ListingTokensSHA256); err != nil {
+		return "", err
+	}
+	for i, h := range cfg.ListingTokens {
+		if slices.Contains(cfg.GatewayTokens, h) {
+			return "", fmt.Errorf("%s has item %d of listing_tokens_sha256 in gateway_tokens_sha256 too, so that token would work on every tool. Give Straza a separate token for the listing, and keep its hash in listing_tokens_sha256 only.", path, i+1)
 		}
-		cfg.GatewayTokens = append(cfg.GatewayTokens, hash)
 	}
 	return "", nil
+}
+
+// parseHashes parses the hashes of key, each as adaptive-pg-mcp token
+// prints it.
+func parseHashes(path, key string, items []string) ([]Hash, error) {
+	var hashes []Hash
+	for i, h := range items {
+		hash, ok := parseHash(h)
+		if !ok {
+			return nil, fmt.Errorf("%s has item %d of %s that is not 64 lowercase hex characters. Copy each hash as adaptive-pg-mcp token prints it.", path, i+1, key)
+		}
+		hashes = append(hashes, hash)
+	}
+	return hashes, nil
 }
 
 // checkTransport checks tls and allow_plain_http. It refuses either key with

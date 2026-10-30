@@ -40,7 +40,7 @@ type Server struct {
 func New(cfg *config.Config, log *slog.Logger) *Server {
 	s := &Server{cfg: cfg, log: log, creds: credentials(cfg), page: listPage}
 	s.mcp = mcp.NewServer(&mcp.Implementation{Name: serverName, Version: buildVersion()}, &mcp.ServerOptions{Logger: log})
-	s.mcp.AddReceivingMiddleware(identify, s.filterTools)
+	s.mcp.AddReceivingMiddleware(identify, s.listingOnly, s.filterTools)
 	s.mcp.AddTool(listDatabasesTool(), s.listDatabases)
 	s.addDataTools()
 	return s
@@ -114,7 +114,8 @@ func identify(next mcp.MethodHandler) mcp.MethodHandler {
 }
 
 // callerFrom returns the caller of the request whose handler runs on ctx:
-// the caller name in standalone mode, or straza in straza mode.
+// the caller name in standalone mode, or straza or straza-listing in straza
+// mode.
 func callerFrom(ctx context.Context) (string, bool) {
 	caller, ok := ctx.Value(callerKey{}).(string)
 	return caller, ok && caller != ""

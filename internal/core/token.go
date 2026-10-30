@@ -16,9 +16,13 @@ import (
 	"github.com/strazahq/adaptive-pg-mcp/internal/config"
 )
 
-// gatewayCaller is the caller of every request in straza mode, where Straza
-// decides per agent.
+// gatewayCaller is the caller of a request with a gateway token in straza
+// mode, where Straza decides per agent.
 const gatewayCaller = "straza"
+
+// listingCaller is the caller of a request with a listing token in straza
+// mode, which may call list_databases only.
+const listingCaller = "straza-listing"
 
 // tokenPrefix starts every token that adaptive-pg-mcp token makes. The token
 // check does not require it.
@@ -31,13 +35,16 @@ type credential struct {
 }
 
 // credentials returns the hashes the token check accepts: those of
-// gateway_tokens_sha256 in straza mode, and those of the callers in
-// access.yaml in standalone mode.
+// gateway_tokens_sha256 and listing_tokens_sha256 in straza mode, and those
+// of the callers in access.yaml in standalone mode.
 func credentials(cfg *config.Config) []credential {
 	var creds []credential
 	if cfg.Mode == config.Straza {
 		for _, h := range cfg.GatewayTokens {
 			creds = append(creds, credential{hash: h, caller: gatewayCaller})
+		}
+		for _, h := range cfg.ListingTokens {
+			creds = append(creds, credential{hash: h, caller: listingCaller})
 		}
 		return creds
 	}

@@ -59,9 +59,9 @@ that the bearer tokens cross the network in cleartext.
 
 ## 3. Configuration
 
-`server.yaml` holds every key below. `tls` and the three `allow_` keys may
-be left out, and each mode takes one of `access` and
-`gateway_tokens_sha256`. The `allow_` keys default to false, which is the
+`server.yaml` holds every key below. `tls`, `listing_tokens_sha256` and
+the three `allow_` keys may be left out, and each mode takes one of `access`
+and `gateway_tokens_sha256`. The `allow_` keys default to false, which is the
 refusing side, and without `tls` HTTP stays plain. Any other missing key
 fails the load and names the key, and an unknown key fails it and names its
 line. A file that holds a second YAML document fails the load too, in
@@ -81,6 +81,7 @@ allow_plain_http: false          # true only when something else encrypts
 free_sql: read-write             # off, read or read-write
 limits: { rows: 1000, bytes: 1048576, timeout: 30s, write_rows: 100 }
 gateway_tokens_sha256: [ "..." ] # straza mode only: the Straza tokens
+listing_tokens_sha256: [ "..." ] # straza mode only: for list_databases
 access: ./access.yaml            # standalone mode only
 catalog: ./catalog               # a folder, or none
 databases:
@@ -104,7 +105,8 @@ SQL. A catalog tool may name any extra login of its database, such as
 `finance_reader`, which `logins` lists next to `read` and `write`.
 
 `access` is required in standalone mode and refused in straza mode, and
-`gateway_tokens_sha256` the other way round. Relative `access`, `catalog`,
+`gateway_tokens_sha256` the other way round. `listing_tokens_sha256` is
+refused in standalone mode, and a hash in both token lists fails the load. Relative `access`, `catalog`,
 `tls.cert_file` and `tls.key_file` paths resolve against the folder of
 server.yaml. Every `dsn_env` variable must be set and not empty, and the
 load names the variable, never its value.
@@ -314,7 +316,8 @@ access.yaml lists for it. The tool carries
 1. The bearer token matches a configured hash, compared in constant time.
    Over stdio this check runs once, at start.
 2. In standalone mode, access.yaml lists the tool for the caller, then the
-   database.
+   database. In straza mode, a listing token may call `list_databases`
+   only.
 3. The arguments match the input schema, and in standalone mode the table
    is one that access.yaml allows the caller.
 4. When `_meta` carries `ai.straza/object-id`, it must equal the database's
@@ -455,6 +458,9 @@ Calls:
 - `access.yaml narrows support_bot to tables, and query_sql can reach any
   table. Use a table tool such as read_rows, or ask an administrator to
   remove the tables of support_bot.`
+- `list_schemas refused the call, because it came with a listing token,
+  which works on list_databases only. Send a token whose SHA-256 is in
+  gateway_tokens_sha256 instead.`
 - `update_rows on helpdesk would change 1,240 rows, over the cap of 100,
   and changed nothing. Narrow the where filter, or ask an administrator to
   raise limits.write_rows in server.yaml.`
@@ -658,13 +664,17 @@ again.`
 Straza needs no change to govern this server. The marks, the listing shape,
 the object id and the required string argument follow Straza's object
 marks reference. In straza mode, the server accepts only the tokens whose
-hashes `gateway_tokens_sha256` lists, such as one for calls and one for the
-listing. Straza decides which tools and which databases each agent may use,
-holds a call for approval when its policy says so, and writes the audit
-record. The server checks the id Straza sends, so a call on a database
-dropped and created again under the same name is refused. In straza mode
-every request has the caller `straza`, because Straza holds the identity of
-the agent.
+hashes `gateway_tokens_sha256` and `listing_tokens_sha256` list. A gateway
+token reaches every tool. A listing token, which Straza sends only to
+`list_databases`, sees that tool alone in `tools/list` and is refused on
+every other tool, as the marks reference asks of a server. Straza decides
+which tools and which databases each agent may use, holds a call for
+approval when its policy says so, and writes the audit record. The server
+checks the id Straza sends, so a call on a database dropped and created
+again under the same name is refused. In straza mode every request with a
+gateway token has the caller `straza`, because Straza holds the identity of
+the agent, and every request with a listing token has the caller
+`straza-listing`. The two callers never share a session.
 
 ## 9. Tests
 

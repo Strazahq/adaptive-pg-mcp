@@ -174,12 +174,16 @@ func TestLoadReadsAValidStrazaConfig(t *testing.T) {
 	set(s, "mode", "straza")
 	del(s, "access")
 	set(s, "gateway_tokens_sha256", []any{hashA, hashB})
+	set(s, "listing_tokens_sha256", []any{strings.Repeat("3", 64)})
 	cfg, _, err := load(t, marshal(t, s, accessDoc(), environment()))
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 	if cfg.Mode != Straza || len(cfg.GatewayTokens) != 2 || cfg.GatewayTokens[1][0] != 0x22 || cfg.Callers != nil {
 		t.Errorf("mode %s gateway tokens %d callers %v", cfg.Mode, len(cfg.GatewayTokens), cfg.Callers)
+	}
+	if len(cfg.ListingTokens) != 1 || cfg.ListingTokens[0][0] != 0x33 {
+		t.Errorf("listing tokens %x, want the one hash of 3s", cfg.ListingTokens)
 	}
 }
 
