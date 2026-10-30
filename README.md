@@ -402,6 +402,41 @@ Two keys per database relax a start check:
   database.
 - `allow_superuser: true` accepts a superuser login while free SQL is on.
 
+### Postgres logins
+
+The server runs on logins that a DBA creates for it, and it creates none
+itself. A read login and a write login for the `helpdesk` database of the
+examples:
+
+```sql
+CREATE ROLE helpdesk_read LOGIN PASSWORD '...';
+CREATE ROLE helpdesk_write LOGIN PASSWORD '...';
+
+GRANT CONNECT ON DATABASE helpdesk TO helpdesk_read, helpdesk_write;
+GRANT USAGE ON SCHEMA public TO helpdesk_read, helpdesk_write;
+
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO helpdesk_read;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO helpdesk_write;
+GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO helpdesk_write;
+```
+
+- Grants decide what agents see as well as what they change. The listing
+  tools and `describe_table` show only the schemas, tables and columns that
+  the login may use.
+- The write login needs `SELECT` next to the change grants, because
+  Postgres checks it for the columns that a `where` filter or `returning`
+  reads.
+- A column whose default calls `nextval`, such as a `serial` column, needs
+  `USAGE` on its sequence.
+- `GRANT ... ON ALL TABLES` covers the tables that exist now. Use
+  `ALTER DEFAULT PRIVILEGES` for tables created later.
+- `execute_ddl` runs on the write login, so it changes only what that login
+  owns or may create. Grant `CREATE` on a schema only where agents should
+  create tables.
+- Never give the server a superuser login while free SQL is on. The start
+  refuses one, and reports a login that holds `BYPASSRLS` or may write to
+  every table.
+
 ### access.yaml
 
 In standalone mode, access.yaml lists the callers:
@@ -505,6 +540,44 @@ The server reads the catalog once, at start, so a changed file takes effect
 after a restart. `adaptive-pg-mcp check` prepares every statement on its
 databases and runs the grants check without serving, so CI can run it
 against a staging database before a deploy.
+
+#### Running a catalog in production
+
+A catalog fits in a git repository of its own, next to access.yaml:
+
+```text
+access.yaml
+catalog/
+  helpdesk/
+    tickets.sql
+    tools.yaml
+  sales/
+    revenue.sql
+    tools.yaml
+```
+
+1. Every change is a pull request, and a code owners rule makes a DBA
+   review each statement and its description.
+2. CI runs `adaptive-pg-mcp check` against a staging database with the
+   same schema, so a statement that does not prepare or lacks a grant fails
+   the pull request.
+3. A merge deploys the files, and the server loads them at its next start.
+
+[examples/kubernetes](examples/kubernetes) makes one ConfigMap per catalog
+folder, because a ConfigMap key holds no folder. Kustomize puts a hash of
+each ConfigMap's content in its name, so a changed file rolls the
+Deployment. A ConfigMap holds at most 1 MiB, so a large catalog does not
+fit in one. Build an image of your own on this one instead, which also
+versions the SQL with the image:
+
+```dockerfile
+FROM ghcr.io/strazahq/adaptive-pg-mcp:0.1.0
+COPY catalog /usr/share/adaptive-pg-mcp/catalog
+```
+
+Then set `catalog: /usr/share/adaptive-pg-mcp/catalog` in server.yaml. The
+path stays outside `/etc/adaptive-pg-mcp`, so the mount that brings
+server.yaml and access.yaml does not hide it.
 
 ## Tools
 
