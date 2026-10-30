@@ -31,9 +31,16 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # setup-go reads only the go line of go.mod, the oldest Go the module
+      # builds with. The build uses the toolchain line, so read that one.
+      - id: go
+        run: |
+          v=$(awk '$1 == "toolchain" { sub(/^go/, "", $2); print $2 }' go.mod)
+          test -n "$v"
+          echo "version=$v" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: go.mod
+          go-version: ${{ steps.go.outputs.version }}
       - run: go vet ./...
       - run: go test ./...
       - run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
