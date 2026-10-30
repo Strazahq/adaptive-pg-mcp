@@ -157,6 +157,6 @@ func token(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	fmt.Fprintf(stdout, "token: %s\ntoken_sha256: %s\n", tok, hash)
-	fmt.Fprintln(stderr, "Give the token to its caller, and put token_sha256 in access.yaml, or in gateway_tokens_sha256 for a Straza token. The token is not stored and will not be shown again.")
+	fmt.Fprintln(stderr, "Give the token to its caller, and put token_sha256 in access.yaml, or in gateway_tokens_sha256 for a Straza token, or listing_tokens_sha256 for its listing token. The token is not stored and will not be shown again.")
 	return 0
 }
