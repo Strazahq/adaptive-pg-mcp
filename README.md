@@ -129,18 +129,20 @@ containers and the data.
 ### Container image
 
 ```sh
-docker pull ghcr.io/strazahq/adaptive-pg-mcp:0.1.0
+docker pull ghcr.io/strazahq/adaptive-pg-mcp:0.1.1
 ```
 
 The image holds the static binary on distroless static and runs as the
 nonroot user, uid 65532. Its default command is
 `serve -config /etc/adaptive-pg-mcp/server.yaml`. It is built for
 linux/amd64 and linux/arm64. A release tag `vX.Y.Z` publishes `X.Y.Z`, and
-each push to main publishes `main` and `sha-<commit>`. Each image published
-from the public repository carries a signed build provenance attestation:
+each push to main publishes `main` and `sha-<commit>`. Each image carries a
+signed build provenance attestation, and from 0.1.1 on an SPDX SBOM that
+scanners such as Trivy, Grype and Docker Scout read from the registry:
 
 ```sh
-gh attestation verify oci://ghcr.io/strazahq/adaptive-pg-mcp:0.1.0 --owner strazahq
+gh attestation verify oci://ghcr.io/strazahq/adaptive-pg-mcp:0.1.1 --owner strazahq
+docker buildx imagetools inspect ghcr.io/strazahq/adaptive-pg-mcp:0.1.1 --format '{{ json .SBOM }}'
 ```
 
 ### Release binaries
@@ -150,11 +152,20 @@ static binary for Linux, macOS and Windows on amd64 and arm64, with a
 `SHA256SUMS` file and a signed build provenance attestation:
 
 ```sh
-curl -fsSLO https://github.com/strazahq/adaptive-pg-mcp/releases/download/v0.1.0/adaptive-pg-mcp_0.1.0_linux_amd64.tar.gz
-curl -fsSLO https://github.com/strazahq/adaptive-pg-mcp/releases/download/v0.1.0/SHA256SUMS
+curl -fsSLO https://github.com/strazahq/adaptive-pg-mcp/releases/download/v0.1.1/adaptive-pg-mcp_0.1.1_linux_amd64.tar.gz
+curl -fsSLO https://github.com/strazahq/adaptive-pg-mcp/releases/download/v0.1.1/SHA256SUMS
 sha256sum --check --ignore-missing SHA256SUMS
-gh attestation verify adaptive-pg-mcp_0.1.0_linux_amd64.tar.gz --owner strazahq
-tar -xzf adaptive-pg-mcp_0.1.0_linux_amd64.tar.gz
+gh attestation verify adaptive-pg-mcp_0.1.1_linux_amd64.tar.gz --owner strazahq
+tar -xzf adaptive-pg-mcp_0.1.1_linux_amd64.tar.gz
+```
+
+From 0.1.1 on, each archive has an SPDX SBOM of its binary beside it, such
+as `adaptive-pg-mcp_0.1.1_linux_amd64.spdx.json`. `SHA256SUMS` lists it, and
+a signed attestation binds it to its archive:
+
+```sh
+gh attestation verify adaptive-pg-mcp_0.1.1_linux_amd64.tar.gz --owner strazahq \
+  --predicate-type https://spdx.dev/Document/v2.3
 ```
 
 The Windows archives are `.zip` files. macOS marks a downloaded binary as
@@ -588,7 +599,7 @@ fit in one. Build an image of your own on this one instead, which also
 versions the SQL with the image:
 
 ```dockerfile
-FROM ghcr.io/strazahq/adaptive-pg-mcp:0.1.0
+FROM ghcr.io/strazahq/adaptive-pg-mcp:0.1.1
 COPY catalog /usr/share/adaptive-pg-mcp/catalog
 ```
 
@@ -739,20 +750,20 @@ it `tls` or `allow_plain_http: true`.
 docker run --rm -p 127.0.0.1:8443:8443 \
   -v /srv/adaptive-pg-mcp:/etc/adaptive-pg-mcp:ro \
   -e HELPDESK_READ_DSN -e HELPDESK_WRITE_DSN \
-  ghcr.io/strazahq/adaptive-pg-mcp:0.1.0
+  ghcr.io/strazahq/adaptive-pg-mcp:0.1.1
 ```
 
 The same image makes tokens, runs the checks, and serves stdio for a client
 that starts it:
 
 ```sh
-docker run --rm ghcr.io/strazahq/adaptive-pg-mcp:0.1.0 token
+docker run --rm ghcr.io/strazahq/adaptive-pg-mcp:0.1.1 token
 docker run --rm -v /srv/adaptive-pg-mcp:/etc/adaptive-pg-mcp:ro \
   -e HELPDESK_READ_DSN -e HELPDESK_WRITE_DSN \
-  ghcr.io/strazahq/adaptive-pg-mcp:0.1.0 check -config /etc/adaptive-pg-mcp/server.yaml
+  ghcr.io/strazahq/adaptive-pg-mcp:0.1.1 check -config /etc/adaptive-pg-mcp/server.yaml
 docker run -i --rm -v /srv/adaptive-pg-mcp:/etc/adaptive-pg-mcp:ro \
   -e ADAPTIVE_PG_MCP_TOKEN -e HELPDESK_READ_DSN -e HELPDESK_WRITE_DSN \
-  ghcr.io/strazahq/adaptive-pg-mcp:0.1.0 serve -config /etc/adaptive-pg-mcp/stdio.yaml
+  ghcr.io/strazahq/adaptive-pg-mcp:0.1.1 serve -config /etc/adaptive-pg-mcp/stdio.yaml
 ```
 
 [examples/kubernetes](examples/kubernetes) holds manifests for

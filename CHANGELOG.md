@@ -8,6 +8,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-30
+
+### Added
+
+- An SPDX SBOM of each release binary, which SHA256SUMS lists and a signed
+  attestation binds to its archive, so a scanner can check a deployed
+  binary for new vulnerabilities without the source.
+- An SPDX SBOM of the container image, stored with it in the registry.
+- A dry run of the release workflow, started by hand with a tag, that
+  builds and scans a version without signing or publishing anything.
+
 ## [0.1.0] - 2026-10-30
 
 ### Added
@@ -58,5 +69,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and Apache-2.0). govulncheck and osv-scanner find no known vulnerability
   in them.
 
-[Unreleased]: https://github.com/strazahq/adaptive-pg-mcp/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/strazahq/adaptive-pg-mcp/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/strazahq/adaptive-pg-mcp/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/strazahq/adaptive-pg-mcp/releases/tag/v0.1.0
