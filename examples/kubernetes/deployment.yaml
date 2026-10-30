@@ -18,10 +18,6 @@ spec:
         app.kubernetes.io/name: adaptive-pg-mcp
     spec:
       automountServiceAccountToken: false
-      # Needed while the image on GHCR is private. kustomization.yaml shows
-      # how to create it.
-      imagePullSecrets:
-        - name: ghcr-pull
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532

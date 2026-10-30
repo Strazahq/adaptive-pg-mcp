@@ -1,18 +1,12 @@
 # adaptive-pg-mcp on Kubernetes: kubectl apply -k examples/kubernetes
 #
-# It needs cert-manager and an issuer, named in certificate.yaml, and two
-# Secrets that stay out of this folder. The connection strings:
+# It needs cert-manager and an issuer, named in certificate.yaml, and a
+# Secret with the connection strings that stays out of this folder:
 #
 #   kubectl -n adaptive-pg-mcp create secret generic adaptive-pg-mcp-dsn \
 #     --from-literal=HELPDESK_READ_DSN='postgres://helpdesk_read:...@pg-helpdesk.example.internal:5432/helpdesk?sslmode=verify-full' \
 #     --from-literal=HELPDESK_WRITE_DSN='postgres://helpdesk_write:...@pg-helpdesk.example.internal:5432/helpdesk?sslmode=verify-full' \
 #     --from-literal=SALES_EU_DSN='postgres://sales_reader:...@pg-sales.example.internal:5432/sales_eu?sslmode=verify-full'
-#
-# The pull secret, while the image is private, from a token that may read
-# packages:
-#
-#   kubectl -n adaptive-pg-mcp create secret docker-registry ghcr-pull \
-#     --docker-server=ghcr.io --docker-username=<user> --docker-password=<token>
 #
 # The server reads server.yaml, access.yaml and the catalog only at start.
 # The generated ConfigMap names carry a hash of their content, so a change

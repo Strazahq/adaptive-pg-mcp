@@ -1,0 +1,94 @@
+# Publishes a GitHub Release for every v* tag: a static binary for Linux,
+# macOS and Windows on amd64 and arm64, a SHA256SUMS file, and the section
+# of CHANGELOG.md for that version as the release notes. The image workflow
+# publishes the container image from the same tag.
+#
+# Every action is pinned by its full commit SHA, with its release in the
+# comment. Change the SHA and the comment together.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  GOTOOLCHAIN: local
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # setup-go reads only the go line of go.mod, the oldest Go the module
+      # builds with. The build uses the toolchain line, so read that one.
+      - id: go
+        run: |
+          v=$(awk '$1 == "toolchain" { sub(/^go/, "", $2); print $2 }' go.mod)
+          test -n "$v"
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ steps.go.outputs.version }}
+      - run: go vet ./...
+      - run: go test ./...
+      - run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+      # The notes are the CHANGELOG.md section of the tag's version. A tag
+      # without its section fails here, before anything is published.
+      - name: Release notes
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version=${TAG#v}
+          awk -v head="## [$version]" 'index($0, head) == 1 { on = 1; next } on && (/^## \[/ || /^\[[^]]+\]: /) { exit } on' CHANGELOG.md > notes.md
+          if ! grep -q '[^[:space:]]' notes.md; then
+            echo "CHANGELOG.md has no section ## [$version], so $TAG has no release notes. Add the section and tag again." >&2
+            exit 1
+          fi
+      - name: Build
+        env:
+          TAG: ${{ github.ref_name }}
+          CGO_ENABLED: "0"
+        run: |
+          version=${TAG#v}
+          mkdir dist
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
+            os=${target%/*} arch=${target#*/}
+            name=adaptive-pg-mcp_${version}_${os}_${arch}
+            ext=; [ "$os" = windows ] && ext=.exe
+            mkdir "$name"
+            GOOS=$os GOARCH=$arch go build -trimpath \
+              -ldflags "-X github.com/strazahq/adaptive-pg-mcp/internal/core.version=${version}" \
+              -o "$name/adaptive-pg-mcp$ext" ./cmd/adaptive-pg-mcp
+            cp LICENSE NOTICE README.md CHANGELOG.md "$name/"
+            if [ "$os" = windows ]; then
+              zip -qr "dist/$name.zip" "$name"
+            else
+              tar -czf "dist/$name.tar.gz" "$name"
+            fi
+          done
+          (cd dist && sha256sum * > SHA256SUMS)
+      # GitHub signs attestations for private repositories on Enterprise
+      # Cloud only, so the step is skipped in a private copy.
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        if: ${{ !github.event.repository.private }}
+        with:
+          subject-path: dist/*
+          create-storage-record: false
+      - name: Publish
+        env:
+          TAG: ${{ github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --verify-tag --title "$TAG" --notes-file notes.md

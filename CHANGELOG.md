@@ -8,6 +8,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-30
+
 ### Added
 
 - The `serve`, `check` and `token` commands. `check` runs the start checks
@@ -46,6 +48,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   name.
 - A container image at `ghcr.io/strazahq/adaptive-pg-mcp` for linux/amd64
   and linux/arm64, on distroless static as a non-root user.
+- Release archives for Linux, macOS and Windows on amd64 and arm64, with a
+  `SHA256SUMS` file and build provenance attestations.
 - Docker Compose and Kubernetes examples. The Kubernetes one takes its TLS
   pair from cert-manager.
 - The direct dependencies github.com/modelcontextprotocol/go-sdk v1.8.0
@@ -53,3 +57,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   github.com/jackc/pgx/v5 v5.11.0 (MIT) and go.yaml.in/yaml/v3 v3.0.5 (MIT
   and Apache-2.0). govulncheck and osv-scanner find no known vulnerability
   in them.
+
+[Unreleased]: https://github.com/strazahq/adaptive-pg-mcp/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/strazahq/adaptive-pg-mcp/releases/tag/v0.1.0

@@ -1,0 +1,46 @@
+# Runs the checks of the local gate on every pull request and every push to
+# main: the text, state and Go gates, gofmt, go vet, the unit tests,
+# govulncheck, and the database tests on Postgres 14 to 18 in Docker.
+# Contributors have no local push gate, so this is where their changes meet
+# the database tests.
+#
+# Every action is pinned by its full commit SHA, with its release in the
+# comment. Change the SHA and the comment together.
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  GOTOOLCHAIN: local
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # setup-go reads only the go line of go.mod, the oldest Go the module
+      # builds with. The build uses the toolchain line, so read that one.
+      - id: go
+        run: |
+          v=$(awk '$1 == "toolchain" { sub(/^go/, "", $2); print $2 }' go.mod)
+          test -n "$v"
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ steps.go.outputs.version }}
+      - run: make check
+      - run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+      - run: make pgtest

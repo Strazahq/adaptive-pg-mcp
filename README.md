@@ -11,9 +11,9 @@ needs no change for it.
 Postgres 14 to 18 are supported. The server targets MCP revision 2026-07-28
 and also serves the earlier revisions that the official Go SDK serves.
 
-No release is tagged yet, and the configuration format may still change
-within version 1 until the first one. The design is
-[docs/DESIGN.md](docs/DESIGN.md).
+From release 0.1.0 on, a change to server.yaml, access.yaml or tools.yaml
+only adds to the format, and [CHANGELOG.md](CHANGELOG.md) records each one.
+The design is [docs/DESIGN.md](docs/DESIGN.md).
 
 - [What the server enforces](#what-the-server-enforces)
 - [Quick start](#quick-start)
@@ -142,6 +142,23 @@ from the public repository carries a signed build provenance attestation:
 ```sh
 gh attestation verify oci://ghcr.io/strazahq/adaptive-pg-mcp:0.1.0 --owner strazahq
 ```
+
+### Release binaries
+
+Each [release](https://github.com/strazahq/adaptive-pg-mcp/releases) holds a
+static binary for Linux, macOS and Windows on amd64 and arm64, with a
+`SHA256SUMS` file and a signed build provenance attestation:
+
+```sh
+curl -fsSLO https://github.com/strazahq/adaptive-pg-mcp/releases/download/v0.1.0/adaptive-pg-mcp_0.1.0_linux_amd64.tar.gz
+curl -fsSLO https://github.com/strazahq/adaptive-pg-mcp/releases/download/v0.1.0/SHA256SUMS
+sha256sum --check --ignore-missing SHA256SUMS
+gh attestation verify adaptive-pg-mcp_0.1.0_linux_amd64.tar.gz --owner strazahq
+tar -xzf adaptive-pg-mcp_0.1.0_linux_amd64.tar.gz
+```
+
+The Windows archives are `.zip` files. macOS marks a downloaded binary as
+quarantined, and `xattr -d com.apple.quarantine adaptive-pg-mcp` lifts that.
 
 ### go install
 
@@ -752,8 +769,7 @@ docker run -i --rm -v /srv/adaptive-pg-mcp:/etc/adaptive-pg-mcp:ro \
   one folder at the paths server.yaml names. cert-manager renews the pair in
   place, and the server serves the new pair without a restart.
 - The connection strings come from a Secret through the environment. The
-  Secret, and the pull secret while the image is private, are created
-  outside the manifests, as kustomization.yaml shows.
+  Secret is created outside the manifests, as kustomization.yaml shows.
 - The probes open a TCP connection, because every HTTP request needs a
   token.
 - Clients on revisions before 2026-07-28 keep a protocol session in the
