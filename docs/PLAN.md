@@ -2,9 +2,7 @@
 
 ## 1. What it is
 
-Most Postgres MCP servers get one connection fixed at start and hand the
-agent free SQL, so every agent holds the same rights and a gateway sees only
-text. adaptive-pg-mcp names the database in every call, gives the agent
+adaptive-pg-mcp names the database in every call, gives the agent
 typed tools, and turns an organization's own reviewed SQL into named tools.
 Behind Straza, a role decides which tools and which databases each agent
 may use, a person can approve a write, and every call is audited with its
@@ -61,6 +59,8 @@ The gates cite these numbers.
    CHANGELOG line in the same commit.
 
 ## 4. Milestones
+
+Version 0.1.0 completes all five.
 
 - M0: the Go module on the newest go-sdk, the package skeleton, and the
   seam between the catalog and the core. The catalog package loads

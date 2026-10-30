@@ -708,8 +708,7 @@ cluster's system identifier, the database OID and the config name. When a
 call's `_meta` carries `ai.straza/object-id`, the server compares it with
 the id read on the call's own connection and refuses a mismatch, so a call
 on a database dropped and created again under the same name is refused
-until Straza lists the databases again. The configuration of Straza itself
-is in its own documentation.
+until Straza lists the databases again.
 
 ## Docker and Kubernetes
 
@@ -767,7 +766,7 @@ that the manifests deliver each connection string and catalog file.
 
 ```sh
 make hooks    # bind the git hooks in .githooks, once per clone
-make check    # the commit gate: text, state and Go gates, gofmt, go vet, go test
+make check    # text, state and Go gates, gofmt, go vet and go test
 make pgtest   # the database tests on Postgres 14 to 18 in local Docker
 make security # gitleaks, govulncheck, osv-scanner and the spec gate
 ```

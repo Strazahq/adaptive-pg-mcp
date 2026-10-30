@@ -525,7 +525,7 @@ Starting, before the checks:
 
 - `ADAPTIVE_PG_MCP_TOKEN is not set, so adaptive-pg-mcp cannot tell who calls
   on stdio and will not start. Set ADAPTIVE_PG_MCP_TOKEN to the token of a
-  caller in access.yaml,, in the env of the client's MCP server entry.`
+  caller in access.yaml, in the env of the client's MCP server entry.`
 - `the token in ADAPTIVE_PG_MCP_TOKEN matches no configured hash, so
   adaptive-pg-mcp will not start. Set ADAPTIVE_PG_MCP_TOKEN to the token of
   a caller in access.yaml.`
@@ -587,7 +587,8 @@ Start checks of the catalog:
 - `helpdesk/tickets.sql statement ticket_count could not be planned on
   helpdesk: Postgres said: terminating connection due to administrator
   command (SQLSTATE 57P01). The grants of the read login of helpdesk cannot
-  be checked without a plan. Fix the cause, and try again.`
+  be checked without a plan. Fix that, and run adaptive-pg-mcp check
+  again.`
 - `finance/revenue.sql statement revenue_by_region on line 1 starts with a
   semicolon, which would split it from the EXPLAIN that checks its grants.
   Remove the semicolon.`
@@ -667,7 +668,8 @@ marks reference. In straza mode, the server accepts only the tokens whose
 hashes `gateway_tokens_sha256` and `listing_tokens_sha256` list. A gateway
 token reaches every tool. A listing token, which Straza sends only to
 `list_databases`, sees that tool alone in `tools/list` and is refused on
-every other tool, as the marks reference asks of a server. Straza decides
+every other tool, because the marks reference asks a server to accept its
+listing token on the listing tool only. Straza decides
 which tools and which databases each agent may use, holds a call for
 approval when its policy says so, and writes the audit record. The server
 checks the id Straza sends, so a call on a database dropped and created

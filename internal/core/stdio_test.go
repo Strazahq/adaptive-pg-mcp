@@ -142,7 +142,7 @@ func TestServeStdioRefusesAMissingOrWrongToken(t *testing.T) {
 		strazaHint     = "a token whose SHA-256 is in gateway_tokens_sha256"
 	)
 	missing := func(hint string) string {
-		return "ADAPTIVE_PG_MCP_TOKEN is not set, so adaptive-pg-mcp cannot tell who calls on stdio and will not start. Set ADAPTIVE_PG_MCP_TOKEN to " + hint + ",, in the env of the client's MCP server entry."
+		return "ADAPTIVE_PG_MCP_TOKEN is not set, so adaptive-pg-mcp cannot tell who calls on stdio and will not start. Set ADAPTIVE_PG_MCP_TOKEN to " + hint + ", in the env of the client's MCP server entry."
 	}
 	wrong := func(hint string) string {
 		return "the token in ADAPTIVE_PG_MCP_TOKEN matches no configured hash, so adaptive-pg-mcp will not start. Set ADAPTIVE_PG_MCP_TOKEN to " + hint + "."

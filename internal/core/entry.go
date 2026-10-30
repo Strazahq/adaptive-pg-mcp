@@ -138,10 +138,7 @@ func narrowEntry(tool string) string {
 // parameter's type, and NULL for an optional parameter the call leaves out.
 // A read stops at its row or byte cap with truncated set. A write is refused
 // and rolled back when it changes more rows than its write_rows cap, counted
-// as execute_sql counts them, or when it changes the system catalogs. The
-// connection closes after the call, because a statement that is not the
-// server's own can change session state that the pool would hand to the
-// next call.
+// as execute_sql counts them, or when it changes the system catalogs.
 func (c *call) entry(ctx context.Context, e catalog.Entry, args map[string]any) *mcp.CallToolResult {
 	binds := make([]any, len(e.Params))
 	for i, p := range e.Params {
@@ -197,9 +194,9 @@ func (c *call) entry(ctx context.Context, e catalog.Entry, args map[string]any) 
 }
 
 // unserved reports, in standalone mode, each tool that a caller in
-// access.yaml lists and the server does not serve, once per caller and name,
-// since such a name gives the caller nothing and is often a typo.
-// catalogNames are the names of the catalog tools.
+// access.yaml lists and that is neither a built-in tool the server serves nor
+// in catalogNames, once per caller and name, since such a name gives the
+// caller nothing and is often a typo.
 func (s *Server) unserved(catalogNames []string) []Finding {
 	if s.cfg.Mode != config.Standalone {
 		return nil

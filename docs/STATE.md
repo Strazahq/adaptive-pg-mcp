@@ -3,7 +3,7 @@
 One keyed line per item, read by grep. The grammar is in CLAUDE.md and
 tools/stategate.sh enforces it. Close an item by deleting its line.
 
-## P owner actions
+## P maintainer actions
 
 
 ## Q queue
@@ -21,6 +21,3 @@ tools/stategate.sh enforces it. Close an item by deleting its line.
 - C-005 standing sql | Free SQL and catalog tools close their connection after each call, because a statement that is not the server's own can change the session that the pool would hand to the next call, and a test shows the leak without it for each. | internal/core/entry.go | [live 10-28]
 - C-006 standing sql | execute_sql and execute_ddl split by the command tag and the rows changed in the system catalogs, never by the SQL text, so a structure change inside a DO block, procedure or function cannot pass through execute_sql. | internal/core/freesql.go | [live 10-28]
 
-## E environment
-
-## S siblings

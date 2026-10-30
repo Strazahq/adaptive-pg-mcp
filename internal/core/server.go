@@ -132,7 +132,7 @@ func (s *Server) ServeStdio(ctx context.Context, token string, t mcp.Transport) 
 		where = "a token whose SHA-256 is in gateway_tokens_sha256"
 	}
 	if token == "" {
-		return fmt.Errorf("%s is not set, so adaptive-pg-mcp cannot tell who calls on stdio and will not start. Set %s to %s,, in the env of the client's MCP server entry.", TokenEnv, TokenEnv, where)
+		return fmt.Errorf("%s is not set, so adaptive-pg-mcp cannot tell who calls on stdio and will not start. Set %s to %s, in the env of the client's MCP server entry.", TokenEnv, TokenEnv, where)
 	}
 	caller, ok := match(s.creds, token)
 	if !ok {

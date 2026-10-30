@@ -31,7 +31,8 @@ Commands:
       Run the start checks without serving, and print the findings.
       Exits 1 when serve would refuse to start.
   adaptive-pg-mcp token
-      Print a new token and its SHA-256 for access.yaml or gateway_tokens_sha256.
+      Print a new token and its SHA-256 for access.yaml, gateway_tokens_sha256 or
+      listing_tokens_sha256.
 `
 
 func main() {
@@ -42,8 +43,8 @@ func main() {
 }
 
 // run runs one command and returns its exit code: 0 on success, 1 when the
-// command fails, and 2 on a usage error. Only token and check write to
-// stdout.
+// command fails, and 2 on a usage error. Only token, check and help write
+// to stdout.
 func run(ctx context.Context, args []string, stdout, stderr io.Writer, getenv func(string) string) int {
 	if len(args) == 0 {
 		fmt.Fprint(stderr, usage)

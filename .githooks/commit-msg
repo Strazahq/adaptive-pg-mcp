@@ -1,7 +1,8 @@
 #!/bin/sh
-# Commit message gate. Two rules:
+# Commit message gate. Three rules:
 #   1. no AI attribution trailer of any kind;
-#   2. the subject is at most 72 characters and says what changed.
+#   2. a subject of at most 72 characters;
+#   3. no em dash in the subject.
 # Merge and revert commits are exempt because git writes their subject.
 msg="$1"
 

@@ -13,13 +13,13 @@ import (
 	"github.com/strazahq/adaptive-pg-mcp/internal/pg"
 )
 
-// freeSQLArgs are the arguments of query_sql and execute_sql.
+// freeSQLArgs are the arguments of the free SQL tools.
 type freeSQLArgs struct {
 	Database string `json:"database"`
 	SQL      string `json:"sql"`
 }
 
-// sqlProp is the statement of query_sql and execute_sql.
+// sqlProp is the statement of the free SQL tools.
 func sqlProp() *jsonschema.Schema {
 	return &jsonschema.Schema{Type: "string", MinLength: atLeast(1), Description: "One SQL statement, sent to Postgres unchanged. More than one statement is refused."}
 }
@@ -100,9 +100,7 @@ func (s *Server) executeSQLTool() *dataTool {
 }
 
 // querySQL runs query_sql. The statement goes to Postgres unchanged on the
-// extended protocol, which refuses more than one statement. The connection
-// is discarded afterwards, because the statement may have changed its
-// session.
+// extended protocol, which refuses more than one statement.
 func (s *Server) querySQL(ctx context.Context, c *call, raw map[string]any) *mcp.CallToolResult {
 	var args freeSQLArgs
 	if err := c.decode(raw, &args); err != nil {
@@ -126,8 +124,7 @@ func (s *Server) querySQL(ctx context.Context, c *call, raw map[string]any) *mcp
 // system catalogs, such as a DO block or a function that truncates or alters
 // a table. The rows changed are the larger of the command tag count and what
 // Postgres counted in every table, so a change inside a function or a WITH
-// query counts against write_rows too. The connection is discarded
-// afterwards, because the statement may have changed its session.
+// query counts against write_rows too.
 func (s *Server) executeSQL(ctx context.Context, c *call, raw map[string]any) *mcp.CallToolResult {
 	var args freeSQLArgs
 	if err := c.decode(raw, &args); err != nil {
@@ -201,8 +198,7 @@ func (s *Server) executeDDLTool() *dataTool {
 // runs. Rows the statement changes in tables that existed before it, such as
 // through a function that a REFRESH runs, count against write_rows, and rows
 // written into a relation the statement creates do not. TRUNCATE and DROP
-// change no counted rows, so no cap applies to them. The connection is
-// discarded afterwards, because the statement may have changed its session.
+// change no counted rows, so no cap applies to them.
 func (s *Server) executeDDL(ctx context.Context, c *call, raw map[string]any) *mcp.CallToolResult {
 	var args freeSQLArgs
 	if err := c.decode(raw, &args); err != nil {

@@ -6,7 +6,8 @@ hooks:
 	chmod +x .githooks/* tools/*.sh
 	@echo "hooks bound: pre-commit, commit-msg and pre-push run from .githooks"
 
-# The same checks the commit gate runs, by hand.
+# Most of the checks the commit gate runs, by hand. The hook also caps Go
+# files at 600 lines.
 check: gate
 
 gate: text state gogate go
@@ -21,7 +22,7 @@ gogate:
 	@sh tools/gogate.sh && echo "go gate: clean"
 
 go:
-	@if [ -f go.mod ]; then gofmt -l . && go vet ./... && go test ./... ; else echo "go: no module yet"; fi
+	@if [ -f go.mod ]; then unformatted=$$(gofmt -l .); [ -z "$$unformatted" ] || { echo "$$unformatted"; echo "go: run gofmt -w on the files above"; exit 1; }; go vet ./... && go test ./... ; else echo "go: no module yet"; fi
 
 # The database tests on Postgres 14 to 18 in local Docker, as the push gate runs them.
 # The harness is always removed again, also when a test fails.

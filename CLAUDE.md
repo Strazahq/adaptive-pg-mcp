@@ -1,27 +1,27 @@
 # adaptive-pg-mcp session rules
 
-An MCP server for PostgreSQL that is safe by construction. Every call names
-its database, the agent gets typed tools, and an organization's own SQL
-becomes named tools with typed parameters. Free SQL is there too, under the
-grants of the login it runs on. It is a plain MCP server that any client can
-use. Behind the Straza gateway it gains identity, per-database roles, approval
-holds and an audit record per call, with no change to the server. One static
-Go binary, fail closed everywhere. Single owner; Claude sessions do most of
-the typing; the git hooks are the gate, not the model.
+An MCP server for PostgreSQL. Every call names its database, the agent gets
+typed tools, and an organization's own SQL becomes named tools with typed
+parameters. Free SQL is there too, under the grants of the login it runs on.
+It is a plain MCP server that any client can use. Behind the Straza gateway
+it gains identity, per-database roles, approval holds and an audit record
+per call, with no change to the server. One static Go binary that fails
+closed everywhere. The git hooks are the gate, not the model.
 
-The repository is private for now and will be public later, so everything in
-it is written for a stranger who runs databases for a living.
+The repository is public, so everything in it is written for a stranger who
+runs databases for a living.
 
 ## Session start (read these, nothing more, before code)
-1. docs/STATE.md by grep: the P lines waiting on the owner, the Q lines of the
-   area in play, the C lines.
+1. docs/STATE.md by grep: the P lines waiting on the maintainer, the Q lines
+   of the area in play, the C lines.
 2. docs/PLAN.md section 2 (decisions) and section 3 (invariants), plus the
    milestone in play.
 3. docs/DESIGN.md for the section the unit touches. Not the whole document.
 4. `make spec`. When it refuses, the unit is the revision update first.
-5. Open with the STATE task menu; the owner picks the unit. One unit per session.
+5. Open with a short list of the open STATE items, and the user picks one.
+   One unit per session.
 
-## Constraint checks (owner rule: the newest MCP revision, security, MCP best practices)
+## Constraint checks: the newest MCP revision, security, MCP best practices
 
 Gated means a hook refuses. Tested means a test in the tree fails. Session
 means the session does it and says so in the unit report.
@@ -51,7 +51,8 @@ means the session does it and says so in the unit report.
 - Session: a new dependency gets a CHANGELOG line with the why, its license
   and a vulnerability check, in the same commit.
 - Session: a change to the token check, the SQL path, the id check or the
-  start checks gets an independent Opus review lane before the commit.
+  start checks gets a review before the commit, by a separate session that
+  did not write the change.
 
 ### MCP best practices
 - Tested by a tool lint test that walks `tools/list` and fails on any tool
@@ -67,9 +68,9 @@ means the session does it and says so in the unit report.
   and a plain sentence. A protocol error is only for a protocol fault.
 - Tested: listings and large results page with an opaque cursor, and a
   cancelled call cancels its query in Postgres.
-- Tested: Streamable HTTP checks `Origin`, listens on localhost unless the
-  config names another address, and never treats a session id as proof of
-  who calls.
+- Tested: Streamable HTTP checks `Origin`, refuses plain HTTP beyond
+  loopback unless `tls` or `allow_plain_http: true` is set, and never treats
+  a session id as proof of who calls.
 - Never: the server forwards a caller's token to Postgres or anywhere else.
 - Sources: the specification at
   `https://modelcontextprotocol.io/specification/<revision>` and its security
@@ -88,8 +89,8 @@ means the session does it and says so in the unit report.
 - `--no-verify`, `-n`, hook path changes and force pushes are never used. A
   red gate is fixed, not bypassed. The session gate (tools/sessiongate.sh,
   wired in .claude/settings.json) refuses those commands before they run.
-- Lanes that share the tree run every go command under one `flock` file, so
-  two test runs never fight over the box.
+- Sessions that share the tree run every go command under
+  `flock .tools/go.lock`, so two test runs never fight over the machine.
 
 ## Writing: for a reader who was not in the session
 - Full sentences, one idea per sentence, plain words. This holds for chat,
@@ -99,7 +100,7 @@ means the session does it and says so in the unit report.
   tools/textgate.sh.
 - Bold-label bullets are not the default form. A bullet is a sentence.
 - Code comments are godoc: one sentence that starts with the name. No
-  session narrative, dates or owner quotes in code. History lives in
+  session narrative, dates or quotes from chat in code. History lives in
   CHANGELOG and PLAN.
 - Every operator-facing message says what failed, why, and what to do next,
   in plain words. Never a bare code.
@@ -122,14 +123,14 @@ CHANGELOG line with the why. Every STATE line the session touched
 reconciled: closed, re-anchored or re-tagged. Affected docs updated in the
 same session.
 
-## Owner rules
+## Working rules
 - Show-then-change: what will change, why this design over the alternatives,
   the risk and what it can break, in chat, then stop for an explicit go.
-- Names are the owner's: the tools, the config keys, the catalog keys.
-  Propose options with plain context, never decide alone.
+- Names are public interface: the tools, the config keys, the catalog keys.
+  Propose options with plain context, and let the user decide.
 - No adjacent cleanups in a diff. Every changed line traces to the request.
   No setting, interface or layer that no current caller or test needs.
-- New scope waits for the owner.
+- New scope waits for the user's go.
 
 ## Where things live
 - docs/DESIGN.md is the design. docs/PLAN.md holds the decisions, the
@@ -137,8 +138,8 @@ same session.
   server targets.
 - docs/STATE.md is live state, one keyed line per item, read by grep:
   `- <ID> <status> <area> | <one sentence> | <anchor> | [<tag> <MM-DD>]`,
-  sections P owner actions, Q queue, B suspected bugs, C standing
-  constraints, E environment, S siblings. Status: open, blocked,
-  waiting-owner, standing. Tag: live, doc, suspect. Close an item by deleting
-  its line. tools/stategate.sh enforces the grammar.
+  sections P maintainer actions, Q queue, B suspected bugs and C standing
+  constraints. Status: open, blocked, waiting-maintainer, standing. Tag:
+  live, doc, suspect. Close an item by deleting its line. tools/stategate.sh
+  enforces the grammar.
 - CHANGELOG.md is the change record.

@@ -22,8 +22,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   agent.
 - `listing_tokens_sha256` in straza mode, for the token Straza sends only to
   `list_databases`. A listing token sees and calls that tool alone, so a
-  leaked one cannot reach data, as Straza's object marks reference asks of
-  a server.
+  leaked one cannot reach data.
 - The built-in tools `list_schemas`, `list_tables`, `describe_table`,
   `read_rows`, `aggregate`, `insert_rows`, `update_rows` and `delete_rows`.
 - Free SQL as `query_sql`, `execute_sql` and `execute_ddl`, split by what

@@ -174,7 +174,7 @@ func planFinding(pools *pg.Pools, at, db, login string, err error) (refusal, rep
 	case slices.ContainsFunc(nullClasses, func(class string) bool { return strings.HasPrefix(code, class) }):
 		return "", at + " does not plan on " + db + " with NULL parameters: " + reason + "." + served + " Fix the statement if real calls fail the same way."
 	}
-	return at + " could not be planned on " + db + ": " + reason + ". The grants of " + login + " cannot be checked without a plan. Fix the cause, and try again.", ""
+	return at + " could not be planned on " + db + ": " + reason + ". The grants of " + login + " cannot be checked without a plan. Fix that, and run adaptive-pg-mcp check again.", ""
 }
 
 // describe prepares sql on login l in its own read-only transaction and

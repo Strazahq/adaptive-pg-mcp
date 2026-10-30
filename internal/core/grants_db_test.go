@@ -239,13 +239,13 @@ func TestCatalogPlanThatEnds(t *testing.T) {
 		want     string
 	}{
 		{name: "a backend terminated while it plans", entry: "ticket_count", sql: "SELECT count(*) AS n FROM tickets WHERE id > end_session(0)",
-			want: "helpdesk/tickets.sql statement ticket_count could not be planned on helpdesk: Postgres said: terminating connection due to administrator command (SQLSTATE 57P01). The grants of the read login of helpdesk cannot be checked without a plan. Fix the cause, and try again."},
+			want: "helpdesk/tickets.sql statement ticket_count could not be planned on helpdesk: Postgres said: terminating connection due to administrator command (SQLSTATE 57P01). The grants of the read login of helpdesk cannot be checked without a plan. Fix that, and run adaptive-pg-mcp check again."},
 		{name: "a check cancelled while it plans", entry: "slow_count", sql: "SELECT count(*) AS n FROM tickets WHERE id > slow_plan(0)", cancel: true,
-			want: "helpdesk/tickets.sql statement slow_count could not be planned on helpdesk: the call was cancelled before Postgres replied. The grants of the read login of helpdesk cannot be checked without a plan. Fix the cause, and try again."},
+			want: "helpdesk/tickets.sql statement slow_count could not be planned on helpdesk: the call was cancelled before Postgres replied. The grants of the read login of helpdesk cannot be checked without a plan. Fix that, and run adaptive-pg-mcp check again."},
 		{name: "a plan past its statement timeout", entry: "timed_count", sql: "SELECT count(*) AS n FROM tickets WHERE id > slow_plan(0)", timeout: "1s",
-			want: "helpdesk/tickets.sql statement timed_count could not be planned on helpdesk: Postgres said: canceling statement due to statement timeout (SQLSTATE 57014). The grants of the read login of helpdesk cannot be checked without a plan. Fix the cause, and try again."},
+			want: "helpdesk/tickets.sql statement timed_count could not be planned on helpdesk: Postgres said: canceling statement due to statement timeout (SQLSTATE 57014). The grants of the read login of helpdesk cannot be checked without a plan. Fix that, and run adaptive-pg-mcp check again."},
 		{name: "a plan that waits for a lock on an index", entry: "ticket_one", sql: "SELECT id FROM tickets WHERE id = 1", timeout: "1s", holdOpen: "REINDEX INDEX tickets_pkey",
-			want: "helpdesk/tickets.sql statement ticket_one could not be planned on helpdesk: Postgres said: canceling statement due to statement timeout (SQLSTATE 57014). The grants of the read login of helpdesk cannot be checked without a plan. Fix the cause, and try again."},
+			want: "helpdesk/tickets.sql statement ticket_one could not be planned on helpdesk: Postgres said: canceling statement due to statement timeout (SQLSTATE 57014). The grants of the read login of helpdesk cannot be checked without a plan. Fix that, and run adaptive-pg-mcp check again."},
 	}
 	for _, s := range pgtest.Servers(t) {
 		t.Run(s.String(), func(t *testing.T) {

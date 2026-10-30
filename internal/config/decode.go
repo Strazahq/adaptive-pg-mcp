@@ -82,9 +82,9 @@ func decodeError(path string, err error) error {
 		return fmt.Errorf("%s line %s has a value of the wrong type, where %s belongs. Write %s there.", path, m[1], kind(m[2]), kind(m[2]))
 	}
 	if m := anyLine.FindStringSubmatch(e); m != nil {
-		return fmt.Errorf("%s line %s has a value adaptive-pg-mcp cannot read. Compare it with the example file.", path, m[1])
+		return fmt.Errorf("%s line %s has a value adaptive-pg-mcp cannot read. Compare it with the format in docs/DESIGN.md section 3.", path, m[1])
 	}
-	return fmt.Errorf("%s has a value adaptive-pg-mcp cannot read. Compare it with the example file.", path)
+	return fmt.Errorf("%s has a value adaptive-pg-mcp cannot read. Compare it with the format in docs/DESIGN.md section 3.", path)
 }
 
 // kind names the YAML a Go type takes, in plain words.
