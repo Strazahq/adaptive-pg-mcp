@@ -479,6 +479,33 @@ The catalog skips files and folders whose name starts with a dot, so it
 loads from a Kubernetes ConfigMap mount. It follows a link only when the
 link is relative and stays inside the catalog folder.
 
+#### Writing catalog tools
+
+Agents never read this README. When a client connects, it fetches the tool
+list, and the agent picks a tool by its name, its `description`, the
+`description`, type and limits of each parameter, and whether it reads or
+writes. The `description` in tools.yaml is the agent's documentation, so
+say what the tool does, what it returns and its caps, in words an agent can
+act on. The start refuses a tool or a parameter without a description.
+
+Each tool is exactly one SQL statement, because the server prepares it as
+one statement. A script of several statements, such as one wrapped in
+`BEGIN` and `COMMIT`, or a psql command such as `\copy` does not prepare,
+and the start refuses it. Parameters are `$1`, `$2` and so on, in the order
+of `params`. psql variables such as `:month` do not work. A parameter of a
+type outside the list above needs a cast in the statement, such as
+`$1::text`.
+
+One `.sql` file may hold many statements, each from its `-- name:` line to
+the next one. A statement that no tools.yaml lists is not a tool, and the
+start reports it. A tools.yaml entry without a statement of its name
+refuses the start.
+
+The server reads the catalog once, at start, so a changed file takes effect
+after a restart. `adaptive-pg-mcp check` prepares every statement on its
+databases and runs the grants check without serving, so CI can run it
+against a staging database before a deploy.
+
 ## Tools
 
 Every tool except `list_databases` takes a required `database` argument,
